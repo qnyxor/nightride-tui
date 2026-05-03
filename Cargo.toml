@@ -1,0 +1,123 @@
+# ---
+# SPDX-FileCopyrightText: (c) 2026 QNYXOR <qnyxor@pm.me> <https://qnyxor.nexus>
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileComment: Part of nightride-tui at <https://github.com/qnyxor/nightride-tui>
+# ---
+
+[package]
+name = "nightride-tui"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["QNYXOR <qnyxor@pm.me>"]
+license = "Apache-2.0"
+description = "Terminal user interface client for the nightride.fm synthwave streams."
+readme = "README.md"
+repository = "https://github.com/qnyxor/nightride-tui"
+homepage = "https://qnyxor.nexus"
+documentation = "https://github.com/qnyxor/nightride-tui"
+keywords = ["tui", "synthwave", "ratatui", "audio", "nightride"]
+categories = ["command-line-utilities", "multimedia::audio"]
+publish = false
+
+[lib]
+name = "nightride_tui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nightride-tui"
+path = "src/main.rs"
+
+# ---------------------------------------------------------------------------
+# Dependencies — pinned for supply-chain hygiene.
+#
+# Priority canon: security > agility > functionality.
+# - reqwest uses rustls-tls only (no system-openssl) for portable, audited TLS.
+# - No git dependencies. crates.io only.
+# - Cargo.lock MUST be committed; cargo audit MUST run clean at Phase 5 verify.
+#
+# v0 dependency map:
+#   tokio              -> async runtime (audio + network + UI tasks).
+#   ratatui            -> terminal rendering primitives.
+#   crossterm          -> terminal backend / input events for ratatui.
+#   reqwest            -> HTTPS client for the MP3 stream endpoint.
+#   symphonia          -> MP3 + AAC/fMP4 codec stack (mp3 default, aac+isomp4 for HLS).
+#   rodio              -> cross-platform audio output sink.
+#   serde              -> serialization framework (kept for v0.1 config loader).
+#   thiserror          -> domain error type derives in src/error.rs.
+#   tracing            -> structured logging spine.
+#   tracing-subscriber -> log subscriber (env filter + fmt layer).
+#   tracing-appender   -> daily-rotated file appender + non-blocking writer.
+#   futures-util       -> StreamExt for the reqwest byte stream.
+#   url                -> validator for stream URLs.
+#
+# Added in v0.2-D (CLI + persistence bootstrap):
+#   clap               -> declarative CLI parser (derive + env).
+#   chrono             -> RFC3339 timestamps for crash log + persisted state.
+#   directories        -> XDG-compliant state/cache dirs for persisted UI prefs.
+#                         Migrated from `directories-next` (deprecated upstream) in
+#                         v1.2.x supply-chain sweep — drop-in API on `ProjectDirs::from`.
+#
+# Added in v1 (redesign + fixes cycle):
+#   tokio-util         -> CancellationToken for cooperative task shutdown.
+#   vergen (build-dep) -> compile-time git/rustc/cargo metadata for diagnostics.
+#
+# Removed in v1 (spectrum FFT -> RMS+envelope rewrite):
+#   rustfft            -> dropped; spectrum.rs now uses an allocation-free RMS
+#                         pipeline with auto-gain peak-decay + envelope smoothing.
+#                         RMS bucketing per the documented audio source helper.
+#
+# Migrated in v1.2:
+#   serde_yaml -> serde_norway: upstream-archived late 2024. First migration
+#                 attempt landed `serde_yml` but RUSTSEC-2025-0068 flagged it
+#                 unsound + unmaintained (Sep 2025). serde_norway is the Apache
+#                 continuation with active maintenance and the original 0.9 API.
+# ---------------------------------------------------------------------------
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "time", "io-util", "net"] }
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+reqwest = { version = "~0.12.28", default-features = false, features = ["rustls-tls", "blocking"] }
+symphonia = { version = "~0.5.5", default-features = false, features = ["mp3"] }
+rodio = { version = "0.20", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_norway = "~0.9.42"
+sha2 = "0.10"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+futures-util = { version = "0.3", default-features = false }
+url = "2"
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+directories = "~6.0.0"
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+
+[build-dependencies]
+vergen = { version = "8", features = ["git", "gitcl", "rustc", "cargo"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+# tokio test-util enables `pause`/`advance` for virtual-time tests.
+tokio = { version = "1", features = ["test-util"] }
+
+[features]
+# `test-export` exposes otherwise pub(crate) test surfaces (App,
+# render_main_test_export, AudioEvent, ConnectionState, Metadata)
+# at the crate root for local integration tests. Default-off so
+# release builds carry zero leakage. The integration tests
+# themselves live in NAS-only space; the public repo ships unit
+# tests + doctests only.
+test-export = []
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = true

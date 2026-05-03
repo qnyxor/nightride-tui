@@ -1,0 +1,39 @@
+Nightride FM Monospace — license grant
+======================================
+
+Source: assets/NightrideFMMonospace.LICENSE.txt (verbatim README from
+the upstream font release on the Nightride FM Discord, file
+`nrfm_font.zip`, 2021-12-31).
+
+Verbatim text from the author:
+
+    Made by Z, creator of Nightride FM - A synthwave radio station
+    and online community.
+
+    This font is 100% free for personal and commercial use.
+
+    I would also love to hear about where you have used this font.
+
+    Contact Info:
+    website: https://nightride.fm
+    discord: https://discord.gg/synthwave
+    patreon: https://patreon.com/nightridefm
+    twitter: https://twitter.com/nightride_fm
+    youtube: https://youtube.com/nightridefm
+    email:   z@nightride.fm
+
+Notes for downstream users
+--------------------------
+
+- The grant above is permissive ("100% free for personal and
+  commercial use") but is *not* an OSI-approved or SPDX-listed font
+  license. Treat it as a custom permissive grant from the author.
+- The font is bundled with nightride-tui purely as an installable
+  brand asset for users who want the Nightride FM display face on
+  their system. The TUI itself does not require this font at
+  runtime — it ships with Iosevka Term Nerd Font Regular for the
+  rasterised UI.
+- Author and ownership claims belong to Z (creator of Nightride FM,
+  z@nightride.fm). nightride-tui redistributes the font with
+  attribution; the upstream README is preserved verbatim alongside
+  the asset at `assets/NightrideFMMonospace.LICENSE.txt`.

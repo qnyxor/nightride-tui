@@ -1,0 +1,17 @@
+# cross-rs config for cross-compiling release binaries.
+# https://github.com/cross-rs/cross
+#
+# nightride-tui pulls in `cpal` (via `rodio`) which links against
+# system ALSA on Linux. Cross's default Docker images for
+# aarch64-unknown-linux-gnu do not ship the ALSA headers, so the
+# alsa-sys build script fails at configure time. The pre-build hook
+# below adds the foreign architecture, refreshes apt indexes inside
+# the container, and installs `libasound2-dev:arm64` plus
+# `pkg-config` so alsa-sys resolves successfully.
+
+[target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update",
+    "apt-get install --assume-yes libasound2-dev:$CROSS_DEB_ARCH pkg-config",
+]

@@ -1,0 +1,53 @@
+# Zero-trust .gitignore (ghost-work-principles §9.1).
+# Deny everything by default; whitelist only the paths that belong in the repo.
+*
+
+# Top-level whitelist.
+!.gitignore
+!.gitattributes
+!.github/
+!.github/banner-nyx-qnyxor.webp
+!.github/logo.webp
+!.github/stations.webp
+!.github/workflows/
+!.github/workflows/**
+
+# Project metadata and config.
+!Cargo.toml
+!Cargo.lock
+!Cross.toml
+!Makefile
+!clippy.toml
+!rustfmt.toml
+!rust-toolchain.toml
+!about.toml
+!about.hbs
+!README.md
+!CHANGELOG.md
+!LICENSE
+!THIRD_PARTY_LICENSES.md
+!nightride-tui.md
+!build.rs
+
+# Source only — tests stay local + NAS (operator directive D20260504).
+!src/
+!src/**
+
+# Hooks + helper scripts.
+!scripts/
+!scripts/**
+
+# Embedded assets (banner files, fonts, images).
+!assets/
+!assets/**
+
+# License texts only — docs/ and research/ stay private (NAS / vault).
+!LICENSES/
+!LICENSES/**
+
+# Re-deny artifacts that may sneak inside whitelisted directories.
+target/
+**/target/
+**/*.rs.bk
+**/.DS_Store
+**/Thumbs.db

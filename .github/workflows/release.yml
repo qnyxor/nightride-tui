@@ -1,0 +1,158 @@
+# ---
+# SPDX-FileCopyrightText: (c) 2026 QNYXOR <qnyxor@pm.me> <https://qnyxor.nexus>
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileComment: Part of nightride-tui at <https://github.com/qnyxor/nightride-tui>
+# ---
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build / ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            cross: false
+          - target: x86_64-apple-darwin
+            runner: macos-14
+            cross: false
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            cross: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux audio dependencies (native x86_64)
+        if: ${{ !matrix.cross && runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add target (native)
+        if: ${{ !matrix.cross }}
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Set up cross toolchain (aarch64 Linux)
+        if: ${{ matrix.cross }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          args: --release
+          # The action handles the build; we skip the native cargo build step below.
+
+      - name: Cache Cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build release binary (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Strip binary (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          STRIP="strip"
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            STRIP="aarch64-linux-gnu-strip"
+          fi
+          $STRIP "target/${{ matrix.target }}/release/nightride-tui" || true
+
+      - name: Strip binary (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        run: strip "target/${{ matrix.target }}/release/nightride-tui"
+
+      - name: Ad-hoc codesign (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        # `strip` invalidates the linker's ad-hoc signature.
+        # macOS 14+ kernel SIGKILLs unsigned arm64 binaries on first
+        # exec, so the tarball must ship a freshly-signed binary.
+        run: codesign --force -s - "target/${{ matrix.target }}/release/nightride-tui"
+
+      - name: Package tarball
+        run: |
+          TAG="${{ github.ref_name }}"
+          TARGET="${{ matrix.target }}"
+          ARCHIVE="nightride-tui-${TARGET}.tar.gz"
+
+          mkdir -p "dist/${TARGET}"
+          cp "target/${TARGET}/release/nightride-tui" "dist/${TARGET}/nightride-tui"
+          cp LICENSE                   "dist/${TARGET}/LICENSE"
+          cp THIRD_PARTY_LICENSES.md   "dist/${TARGET}/THIRD_PARTY_LICENSES.md"
+          cp README.md                 "dist/${TARGET}/README.md"
+
+          tar -czf "$ARCHIVE" -C "dist/${TARGET}" \
+              nightride-tui LICENSE THIRD_PARTY_LICENSES.md README.md
+
+          if command -v shasum >/dev/null 2>&1; then
+              shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
+          else
+              sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightride-tui-${{ matrix.target }}
+          path: |
+            nightride-tui-${{ matrix.target }}.tar.gz
+            nightride-tui-${{ matrix.target }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            Release ${{ github.ref_name }}
+          files: artifacts/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

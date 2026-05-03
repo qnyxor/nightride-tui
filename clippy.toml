@@ -1,0 +1,10 @@
+avoid-breaking-exported-api = true
+
+# Colour-token canon: `ratatui::style::Color::*` constructors are only allowed
+# inside `src/theme.rs`. Other modules use `theme::Theme::resolve(token)` or
+# `Theme::accent_for(station)` to obtain colours from `PaletteToken`.
+#
+# `disallowed-methods` and `disallowed-types` cannot scope by file in clippy
+# today; the integration test `tests/ad05_invariant.rs` walks
+# `src/` and fails on any `Color::` reference outside `src/theme.rs`. This
+# config block is documentation; the real gate is the integration test.

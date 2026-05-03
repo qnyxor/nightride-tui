@@ -1,0 +1,112 @@
+// ---
+// SPDX-FileCopyrightText: (c) 2026 QNYXOR <qnyxor@pm.me> <https://qnyxor.nexus>
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileComment: Part of nightride-tui at <https://github.com/qnyxor/nightride-tui>
+// ---
+
+//! Build script.
+//!
+//! 1. Verifies the embedded `assets/IosevkaTermNerdFont-Regular.ttf` against
+//!    a pinned SHA-256 for reproducibility and emits the
+//!    `IOSEVKA_SHA256` env var used by `cargo run --version` and the SYSTEM
+//!    modal.
+//! 2. Verifies the embedded `assets/NightrideFMMonospace.ttf` against a
+//!    pinned SHA-256 (brand-asset integrity; same supply-chain canon as
+//!    Iosevka) and emits `NIGHTRIDE_FONT_SHA256` for runtime verify in
+//!    `cli::install_font`. The TUI does not render with this font; it
+//!    ships only for `install-font` to drop into the user's system.
+//! 3. Emits compile-time vergen metadata (`VERGEN_GIT_SHA`,
+//!    `VERGEN_RUSTC_SEMVER`, `VERGEN_CARGO_TARGET_TRIPLE`).
+//!
+//! If `vergen` fails (e.g. release source zips that ship without `.git`)
+//! we swallow the error so `option_env!` callers fall back to "unknown".
+
+use sha2::{Digest, Sha256};
+
+/// Pinned SHA-256 of `assets/IosevkaTermNerdFont-Regular.ttf`.
+///
+/// Verified at download time. To refresh the asset:
+///
+/// ```sh
+/// make fetch-iosevka          # re-downloads from upstream
+/// shasum -a 256 assets/IosevkaTermNerdFont-Regular.ttf
+/// ```
+///
+/// Paste the new digest here, commit asset + Cargo.lock + this constant
+/// in the same commit so reviewers see the integrity link.
+const IOSEVKA_SHA256_PIN: &str = "a64e7ac3b0691a72f2311478b168a5fd4c3cd594141c42a9e920dd3b436bac80";
+
+const IOSEVKA_PATH: &str = "assets/IosevkaTermNerdFont-Regular.ttf";
+
+/// Pinned SHA-256 of `assets/NightrideFMMonospace.ttf`.
+///
+/// Source: `nrfm_font.zip` (Nightride FM community Discord, 2021-12-31)
+/// authored by Z (z@nightride.fm). Verified at download time. The font
+/// is bundled solely as a brand asset for `install-font`; runtime
+/// rendering still uses Iosevka.
+const NIGHTRIDE_FONT_SHA256_PIN: &str =
+    "bed6a0135f53da7b3ccb4befe04376af31fe781acde9c2e9df4eca113bd7e0ec";
+
+const NIGHTRIDE_FONT_PATH: &str = "assets/NightrideFMMonospace.ttf";
+
+fn main() {
+    println!("cargo:rerun-if-changed={IOSEVKA_PATH}");
+    println!("cargo:rerun-if-changed={NIGHTRIDE_FONT_PATH}");
+    // Re-run when the embedded schema template changes; otherwise cargo
+    // caches the include_str! payload from a stale revision.
+    println!("cargo:rerun-if-changed=nightride-tui.md");
+    verify_asset(
+        IOSEVKA_PATH,
+        IOSEVKA_SHA256_PIN,
+        "IOSEVKA_SHA256",
+        "IOSEVKA_PATH",
+        "make fetch-iosevka",
+        "IOSEVKA_SHA256_PIN",
+    );
+    verify_asset(
+        NIGHTRIDE_FONT_PATH,
+        NIGHTRIDE_FONT_SHA256_PIN,
+        "NIGHTRIDE_FONT_SHA256",
+        "NIGHTRIDE_FONT_PATH",
+        "(re-extract from upstream nrfm_font.zip)",
+        "NIGHTRIDE_FONT_SHA256_PIN",
+    );
+
+    if let Err(err) = vergen::EmitBuilder::builder()
+        .git_sha(false)
+        .rustc_semver()
+        .cargo_target_triple()
+        .emit()
+    {
+        println!("cargo:warning=vergen emit failed ({err}); option_env! will fall back");
+    }
+}
+
+fn verify_asset(
+    path: &str,
+    pin: &str,
+    sha_env: &str,
+    path_env: &str,
+    refresh_hint: &str,
+    pin_const: &str,
+) {
+    let bytes = std::fs::read(path).unwrap_or_else(|err| {
+        panic!("asset missing at {path}: {err}. Run `{refresh_hint}` to restore.")
+    });
+
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let digest = hasher.finalize();
+    let computed = format!("{digest:x}");
+
+    if computed != pin {
+        panic!(
+            "{path} SHA-256 mismatch.\n  expected: {pin}\n  computed: {computed}\n\
+             The committed asset has been replaced or corrupted. Refresh via \
+             `{refresh_hint}` and update {pin_const} in build.rs."
+        );
+    }
+
+    println!("cargo:rustc-env={sha_env}={pin}");
+    println!("cargo:rustc-env={path_env}={path}");
+}

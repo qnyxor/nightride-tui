@@ -1,0 +1,46 @@
+# cargo-about configuration for nightride-tui.
+#
+# License whitelist follows the dependency governance canon:
+# permissive licenses only. Any crate carrying a license outside this
+# list fails `cargo about generate` and surfaces as a release blocker —
+# an explicit decision is required before merging.
+#
+# `targets` narrows the dependency graph to the platforms the binary
+# actually ships on, dropping platform-specific transitives that never
+# end up in the release archive (Windows-only crates, WASM shims, etc).
+
+accepted = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Unlicense",
+    "CC0-1.0",
+    "Zlib",
+    "BSL-1.0",
+    "0BSD",
+    "Apache-2.0 WITH LLVM-exception",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+]
+
+ignore-build-dependencies = false
+ignore-dev-dependencies = true
+ignore-transitive-dependencies = false
+
+# Targets the binary actually ships on. Anything platform-gated outside
+# these triples is excluded from the report.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+# Workarounds for crates with non-standard licensing metadata.
+# `ring` ships its own ISC-derived combined license; cargo-about needs
+# a hint to recognise it.
+[ring]
+accepted = ["ISC", "OpenSSL", "MIT"]
