@@ -34,7 +34,7 @@ use sha2::{Digest, Sha256};
 ///
 /// Paste the new digest here, commit asset + Cargo.lock + this constant
 /// in the same commit so reviewers see the integrity link.
-const IOSEVKA_SHA256_PIN: &str = "a64e7ac3b0691a72f2311478b168a5fd4c3cd594141c42a9e920dd3b436bac80";
+const IOSEVKA_SHA256_PIN: &str = "d5116846a175ef4a988f61241dd3572d6a9dd3e09d4d168c67954b10783a7880";
 
 const IOSEVKA_PATH: &str = "assets/IosevkaTermNerdFont-Regular.ttf";
 
@@ -62,6 +62,7 @@ fn main() {
         "IOSEVKA_PATH",
         "make fetch-iosevka",
         "IOSEVKA_SHA256_PIN",
+        AssetKind::Font,
     );
     verify_asset(
         NIGHTRIDE_FONT_PATH,
@@ -70,6 +71,7 @@ fn main() {
         "NIGHTRIDE_FONT_PATH",
         "(re-extract from upstream nrfm_font.zip)",
         "NIGHTRIDE_FONT_SHA256_PIN",
+        AssetKind::Font,
     );
 
     if let Err(err) = vergen::EmitBuilder::builder()
@@ -82,6 +84,10 @@ fn main() {
     }
 }
 
+enum AssetKind {
+    Font,
+}
+
 fn verify_asset(
     path: &str,
     pin: &str,
@@ -89,10 +95,15 @@ fn verify_asset(
     path_env: &str,
     refresh_hint: &str,
     pin_const: &str,
+    kind: AssetKind,
 ) {
     let bytes = std::fs::read(path).unwrap_or_else(|err| {
         panic!("asset missing at {path}: {err}. Run `{refresh_hint}` to restore.")
     });
+
+    match kind {
+        AssetKind::Font => verify_font_magic(path, &bytes, refresh_hint),
+    }
 
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
@@ -109,4 +120,21 @@ fn verify_asset(
 
     println!("cargo:rustc-env={sha_env}={pin}");
     println!("cargo:rustc-env={path_env}={path}");
+}
+
+/// Reject anything whose first 4 bytes are not a known SFNT magic.
+/// Belt-and-suspenders against the `make fetch-iosevka` failure mode where
+/// upstream serves an HTML 404 page, which a SHA pin alone happily blesses.
+/// Accepted: TrueType (`00 01 00 00`), OpenType/CFF (`OTTO`), classic Mac
+/// (`true`), PostScript-flavoured (`typ1`).
+fn verify_font_magic(path: &str, bytes: &[u8], refresh_hint: &str) {
+    const MAGICS: &[&[u8]] = &[&[0x00, 0x01, 0x00, 0x00], b"OTTO", b"true", b"typ1"];
+    let head = bytes.get(..4).unwrap_or(&[]);
+    if !MAGICS.contains(&head) {
+        panic!(
+            "{path} is not a valid font file (first 4 bytes: {head:02x?}). \
+             Likely an HTML error page or truncated download. \
+             Refresh via `{refresh_hint}`."
+        );
+    }
 }

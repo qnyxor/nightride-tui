@@ -554,12 +554,22 @@ mod tests {
 
     #[test]
     fn iosevka_blob_is_non_trivial_size() {
-        // Iosevka Term Nerd Font Regular sits around 297 KB; guard
-        // against a corrupted blob that compiles but is empty or huge.
+        // Iosevka Term Nerd Font Regular sits around 12.6 MB. Guard
+        // against (a) a corrupted / empty blob, and (b) the historic
+        // bug where `make fetch-iosevka` cached an HTML 404 page and
+        // shipped it as the .ttf — that envelope (~298 KB) is now
+        // explicitly outside the lower bound.
         assert!(
-            IOSEVKA_BLOB.len() > 100_000 && IOSEVKA_BLOB.len() < 1_000_000,
+            IOSEVKA_BLOB.len() > 5_000_000 && IOSEVKA_BLOB.len() < 30_000_000,
             "Iosevka blob size out of expected band: {}",
             IOSEVKA_BLOB.len()
+        );
+        // SFNT magic for TrueType: `00 01 00 00`. Closes the
+        // SHA-pinned-but-still-HTML failure mode end-to-end.
+        assert_eq!(
+            &IOSEVKA_BLOB[..4],
+            &[0x00, 0x01, 0x00, 0x00],
+            "Iosevka blob is not TrueType (magic bytes mismatch)"
         );
         assert_ne!(IOSEVKA_SHA256, "unknown");
     }
@@ -579,7 +589,9 @@ mod tests {
     }
 
     /// Roster sanity: at least Iosevka + Nightride, every entry has
-    /// a non-empty file name + non-empty credit line.
+    /// a non-empty file name + non-empty credit line, and a paired
+    /// license blob/filename so `install-*-font` can ship the grant
+    /// next to the .ttf on the user's disk.
     #[test]
     fn installable_fonts_roster_well_formed() {
         assert!(INSTALLABLE_FONTS.len() >= 2);
@@ -589,6 +601,14 @@ mod tests {
             assert!(!font.credit.is_empty(), "missing credit");
             assert!(!font.blob.is_empty(), "empty blob");
             assert_eq!(font.sha256.len(), 64, "sha256 must be 64 hex chars");
+            let license_name = font
+                .license_file_name
+                .expect("license_file_name required for redistribution");
+            let license_blob = font
+                .license_blob
+                .expect("license_blob required for redistribution");
+            assert!(license_name.ends_with(".LICENSE.txt"));
+            assert!(!license_blob.is_empty(), "empty license blob");
         }
     }
 

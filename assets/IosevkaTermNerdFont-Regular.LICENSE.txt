@@ -1,0 +1,24 @@
+Iosevka Term Nerd Font Regular
+==============================
+
+Copyright (c) 2015-2024, Belleve Invis <be5invis@gmail.com>,
+with Reserved Font Name "Iosevka".
+
+Patched with Nerd Fonts glyphs (https://www.nerdfonts.com)
+by Ryan L McIntyre <https://github.com/ryanoasis>.
+
+Licensed under the SIL Open Font License, Version 1.1.
+Full text:  https://openfontlicense.org
+
+Upstream sources:
+  - Iosevka     https://github.com/be5invis/Iosevka
+  - Nerd Fonts  https://github.com/ryanoasis/nerd-fonts
+
+Distributed with nightride-tui (https://github.com/qnyxor/nightride-tui)
+solely as a convenience for users whose default monospace font lacks
+Braille / Box Drawing / Block Elements coverage. nightride-tui itself
+is licensed under Apache-2.0 and does not depend on any Nerd-Font
+private-use glyphs.
+
+A complete copy of the SIL OFL 1.1 ships in this distribution at
+LICENSES/SIL-OFL-1.1.txt.

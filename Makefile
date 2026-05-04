@@ -160,7 +160,9 @@ notice:
 # constant together so reviewers see the integrity link in one diff.
 fetch-iosevka:
 	@mkdir -p assets
-	curl -L -o assets/IosevkaTermNerdFont-Regular.ttf \
-	  "https://github.com/ryanoasis/nerd-fonts/raw/master/patched-fonts/IosevkaTerm/Regular/IosevkaTermNerdFont-Regular.ttf"
+	curl --fail-with-body -L -o assets/IosevkaTermNerdFont-Regular.ttf \
+	  "https://github.com/ryanoasis/nerd-fonts/raw/master/patched-fonts/IosevkaTerm/IosevkaTermNerdFont-Regular.ttf"
+	@head -c 4 assets/IosevkaTermNerdFont-Regular.ttf | xxd | grep -q '0001 0000' \
+	  || { echo "ERROR: downloaded blob is not a TrueType font (magic bytes mismatch). Aborting."; rm -f assets/IosevkaTermNerdFont-Regular.ttf; exit 1; }
 	@echo "--- new SHA-256 (paste into IOSEVKA_SHA256_PIN in build.rs) ---"
 	@shasum -a 256 assets/IosevkaTermNerdFont-Regular.ttf

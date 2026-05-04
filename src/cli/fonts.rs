@@ -65,7 +65,26 @@ pub(super) struct InstallableFont {
     pub(super) display_name: &'static str,
     /// Credit line printed after install ("by AUTHOR — LICENSE").
     pub(super) credit: &'static str,
+    /// Optional companion license filename written alongside the font.
+    /// Closes OFL 1.1 §2 / equivalent grants by keeping the license
+    /// next to its font on the user's disk, not just inside the source
+    /// tree.
+    pub(super) license_file_name: Option<&'static str>,
+    /// License text bundled with the font asset.
+    pub(super) license_blob: Option<&'static [u8]>,
 }
+
+/// SIL OFL 1.1 attribution + reserved-font-name notice for the bundled
+/// Iosevka Term Nerd Font Regular. Travels with the .ttf when
+/// `install-tui-font` writes it, satisfying OFL 1.1 §2.
+pub(super) const IOSEVKA_LICENSE_BLOB: &[u8] =
+    include_bytes!("../../assets/IosevkaTermNerdFont-Regular.LICENSE.txt");
+
+/// Verbatim upstream README for the Nightride FM Monospace asset
+/// (custom permissive grant from author Z). Travels with the .ttf
+/// when `install-nightride-font` writes it.
+pub(super) const NIGHTRIDE_FONT_LICENSE_BLOB: &[u8] =
+    include_bytes!("../../assets/NightrideFMMonospace.LICENSE.txt");
 
 /// The TUI's runtime render face. `install-font` writes this one.
 pub(super) const IOSEVKA: InstallableFont = InstallableFont {
@@ -74,6 +93,8 @@ pub(super) const IOSEVKA: InstallableFont = InstallableFont {
     sha256: IOSEVKA_SHA256,
     display_name: "Iosevka Term Nerd Font Regular",
     credit: "by Belleve Invis (Iosevka) + Ryan L McIntyre (Nerd Fonts) — SIL OFL 1.1",
+    license_file_name: Some("IosevkaTermNerdFont-Regular.LICENSE.txt"),
+    license_blob: Some(IOSEVKA_LICENSE_BLOB),
 };
 
 /// The Nightride FM brand display face. `install-nightride-font` writes
@@ -89,6 +110,8 @@ pub(super) const NIGHTRIDE_FM_MONO: InstallableFont = InstallableFont {
     sha256: NIGHTRIDE_FONT_SHA256,
     display_name: "Nightride FM Monospace",
     credit: "by Z (Nightride FM Discord, z@nightride.fm) — free for personal & commercial use",
+    license_file_name: Some("NightrideFMMonospace.LICENSE.txt"),
+    license_blob: Some(NIGHTRIDE_FONT_LICENSE_BLOB),
 };
 
 /// Roster preserved for invariant tests. Each entry has its own
@@ -175,6 +198,15 @@ fn install_one_font(font: &InstallableFont) -> Result<()> {
     println!("installed {} to {}", font.display_name, dest.display());
     println!("  size: {} bytes  sha256: {}", font.blob.len(), font.sha256);
     println!("  {}", font.credit);
+
+    if let (Some(name), Some(blob)) = (font.license_file_name, font.license_blob) {
+        let license_dest = dir.join(name);
+        std::fs::write(&license_dest, blob).map_err(|err| NightrideError::Io {
+            op: "cli::install_font::write_license",
+            source: err,
+        })?;
+        println!("  license: {}", license_dest.display());
+    }
 
     // Best-effort fc-cache refresh on Linux. macOS auto-rescans.
     if cfg!(target_os = "linux") {
