@@ -112,6 +112,8 @@ pub(crate) fn decode_loop(
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
+        // Identify ourselves so server logs and abuse reports are actionable.
+        .user_agent(crate::USER_AGENT)
         .build()
     {
         Ok(c) => c,

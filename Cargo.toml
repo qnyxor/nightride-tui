@@ -6,7 +6,7 @@
 
 [package]
 name = "nightride-tui"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 rust-version = "1.85"
 authors = ["QNYXOR <qnyxor@pm.me>"]
@@ -94,6 +94,11 @@ clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 directories = "~6.0.0"
 tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+# Added in v1.0.2 (foundations):
+#   tempfile   -> deterministic temporary files for update_check download staging.
+#   indicatif  -> progress display for long-running CLI operations (no default extras).
+tempfile = "~3.27.0"
+indicatif = { version = "~0.18.4", default-features = false }
 
 [build-dependencies]
 vergen = { version = "8", features = ["git", "gitcl", "rustc", "cargo"] }

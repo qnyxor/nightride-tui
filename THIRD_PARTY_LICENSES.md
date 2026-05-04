@@ -9,8 +9,8 @@ bundled crate is attributed to its license through the index.
 
 | License | Crates |
 |---------|--------|
-| [Apache License 2.0](#Apache-2.0) | 148 |
-| [MIT License](#MIT) | 47 |
+| [Apache License 2.0](#Apache-2.0) | 154 |
+| [MIT License](#MIT) | 50 |
 | [Unicode License v3](#Unicode-3.0) | 19 |
 | [Mozilla Public License 2.0](#MPL-2.0) | 5 |
 | [ISC License](#ISC) | 4 |
@@ -1300,7 +1300,7 @@ Used by:
 
 Used by:
 
-- [nightride-tui 1.0.0](https://github.com/qnyxor/nightride-tui)
+- [nightride-tui 1.0.2](https://github.com/qnyxor/nightride-tui)
 
 ```text
                                  Apache License
@@ -3866,6 +3866,7 @@ Used by:
 - [either 1.15.0](https://github.com/rayon-rs/either)
 - [equivalent 1.0.2](https://github.com/indexmap-rs/equivalent)
 - [errno 0.3.14](https://github.com/lambda-fairy/rust-errno)
+- [fastrand 2.4.1](https://github.com/smol-rs/fastrand)
 - [find-msvc-tools 0.1.9](https://github.com/rust-lang/cc-rs)
 - [fnv 1.0.7](https://github.com/servo/rust-fnv)
 - [form_urlencoded 1.2.2](https://github.com/servo/rust-url)
@@ -3880,6 +3881,7 @@ Used by:
 - [indexmap 2.14.0](https://github.com/indexmap-rs/indexmap)
 - [itertools 0.13.0](https://github.com/rust-itertools/itertools)
 - [lazy_static 1.5.0](https://github.com/rust-lang-nursery/lazy-static.rs)
+- [linux-raw-sys 0.12.1](https://github.com/sunfishcode/linux-raw-sys)
 - [linux-raw-sys 0.4.15](https://github.com/sunfishcode/linux-raw-sys)
 - [lock_api 0.4.14](https://github.com/Amanieu/parking_lot)
 - [log 0.4.29](https://github.com/rust-lang/log)
@@ -3895,6 +3897,7 @@ Used by:
 - [ring 0.17.14](https://github.com/briansmith/ring)
 - [rustc_version 0.4.1](https://github.com/djc/rustc-version-rs)
 - [rustix 0.38.44](https://github.com/bytecodealliance/rustix)
+- [rustix 1.1.4](https://github.com/bytecodealliance/rustix)
 - [rustls 0.23.39](https://github.com/rustls/rustls)
 - [scopeguard 1.2.0](https://github.com/bluss/scopeguard)
 - [signal-hook-mio 0.2.5](https://github.com/vorner/signal-hook)
@@ -3904,6 +3907,7 @@ Used by:
 - [socket2 0.6.3](https://github.com/rust-lang/socket2)
 - [stable_deref_trait 1.2.1](https://github.com/storyyeller/stable_deref_trait)
 - [symlink 0.1.0](https://gitlab.com/chris-morgan/symlink)
+- [tempfile 3.27.0](https://github.com/Stebalien/tempfile)
 - [thread_local 1.1.9](https://github.com/Amanieu/thread_local-rs)
 - [unicode-segmentation 1.13.2](https://github.com/unicode-rs/unicode-segmentation)
 - [unicode-truncate 1.1.0](https://github.com/Aetf/unicode-truncate)
@@ -4548,6 +4552,7 @@ limitations under the License.
 Used by:
 
 - [getrandom 0.2.17](https://github.com/rust-random/getrandom)
+- [getrandom 0.3.4](https://github.com/rust-random/getrandom)
 - [vergen 8.3.2](https://github.com/rustyhorde/vergen)
 
 ```text
@@ -5265,6 +5270,7 @@ Used by:
 - [mach2 0.4.3](https://github.com/JohnTitor/mach2)
 - [paste 1.0.15](https://github.com/dtolnay/paste)
 - [pin-project-lite 0.2.17](https://github.com/taiki-e/pin-project-lite)
+- [portable-atomic 1.13.1](https://github.com/taiki-e/portable-atomic)
 - [proc-macro2 1.0.106](https://github.com/dtolnay/proc-macro2)
 - [quote 1.0.45](https://github.com/dtolnay/quote)
 - [rustc-hash 2.1.2](https://github.com/rust-lang/rustc-hash)
@@ -6694,6 +6700,37 @@ SOFTWARE.
 
 Used by:
 
+- [unit-prefix 0.5.2](https://codeberg.org/commons-rs/unit-prefix)
+
+```text
+MIT License
+
+Copyright (c) 2024 Benjamin Sago, Fabio Valentini
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+```
+
+### <a id="MIT"></a>MIT License
+
+Used by:
+
 - [tokio-util 0.7.18](https://github.com/tokio-rs/tokio)
 - [tokio 1.52.1](https://github.com/tokio-rs/tokio)
 
@@ -6882,6 +6919,39 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+```
+
+### <a id="MIT"></a>MIT License
+
+Used by:
+
+- [console 0.16.3](https://github.com/console-rs/console)
+- [indicatif 0.18.4](https://github.com/console-rs/indicatif)
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2017 Armin Ronacher &lt;armin.ronacher@active-4.com&gt;
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 
 ```
 

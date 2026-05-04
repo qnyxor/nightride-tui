@@ -64,6 +64,20 @@ pub mod ui;
 
 pub use error::{NightrideError, Result};
 
+/// Single source of truth for the HTTP `User-Agent` header sent on every
+/// `reqwest` client in this crate.
+///
+/// Identifies the calling application to upstream operators per RFC 9110 §10.1.5,
+/// making logs and abuse reports audit-friendly without any runtime allocation.
+pub const USER_AGENT: &str = concat!(
+    env!("CARGO_PKG_NAME"),
+    "/",
+    env!("CARGO_PKG_VERSION"),
+    " (+",
+    env!("CARGO_PKG_REPOSITORY"),
+    ")",
+);
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
@@ -271,5 +285,22 @@ fn flush_save(path: &std::path::Path, base: &config::Config, state: &ui::FinalSt
     cfg.default_volume = state.volume;
     if let Err(err) = config::save_state(path, &cfg) {
         warn!(err = %err, path = %path.display(), "save_debouncer write failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::USER_AGENT;
+
+    /// Permanent invariant guard: USER_AGENT must resolve to the canonical
+    /// `<name>/<version> (+<repo>)` form. Fails the build if someone bumps
+    /// the version in Cargo.toml without noticing this assertion — the correct
+    /// fix is to update the expected string here alongside the version bump.
+    #[test]
+    fn user_agent_resolves_correctly() {
+        assert_eq!(
+            USER_AGENT,
+            "nightride-tui/1.0.2 (+https://github.com/qnyxor/nightride-tui)",
+        );
     }
 }

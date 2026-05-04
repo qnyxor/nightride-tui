@@ -472,10 +472,7 @@ pub fn list_stations() {
 
 #[cfg(test)]
 mod tests {
-    use super::fonts::{
-        INSTALLABLE_FONTS, IOSEVKA_BLOB, IOSEVKA_SHA256, NIGHTRIDE_FONT_BLOB,
-        NIGHTRIDE_FONT_SHA256, verify_font_sha,
-    };
+    use super::fonts::{INSTALLABLE_FONTS, NIGHTRIDE_FONT_BLOB, NIGHTRIDE_FONT_SHA256};
     use super::{CliArgs, Command, dispatch};
     use crate::error::{NightrideError, Result};
     use crate::station::by_slug;
@@ -541,37 +538,56 @@ mod tests {
         assert_eq!(args.station.as_deref(), Some(""));
     }
 
-    /// Every installable font's runtime SHA matches its build-pinned
-    /// constant. Defence in depth — `build.rs` already asserted each
-    /// one before embed.
+    /// Every embedded font's runtime SHA matches its build-pinned constant.
+    /// Defence in depth — `build.rs` already asserted each one before embed.
+    /// Remote-source fonts (e.g. Iosevka) are verified at install time, not
+    /// at compile time, so they are skipped here.
     #[test]
     fn embedded_font_shas_match_pins() {
+        use crate::cli::fonts::{FontSource, verify_font_sha};
+
         for font in INSTALLABLE_FONTS {
-            verify_font_sha(font)
-                .unwrap_or_else(|err| panic!("embedded {} SHA mismatch: {err}", font.file_name));
+            if let FontSource::Embedded { blob } = font.source {
+                verify_font_sha(blob, font.sha256).unwrap_or_else(|e| {
+                    panic!("embedded font {} failed SHA: {e:?}", font.file_name)
+                });
+            }
+            // Remote-source fonts are verified at install time, not at compile time.
         }
     }
 
+    /// Iosevka is now Remote — asserts URL pin and SHA pin shapes rather than
+    /// blob size (the blob no longer exists at compile time).
     #[test]
-    fn iosevka_blob_is_non_trivial_size() {
-        // Iosevka Term Nerd Font Regular sits around 12.6 MB. Guard
-        // against (a) a corrupted / empty blob, and (b) the historic
-        // bug where `make fetch-iosevka` cached an HTML 404 page and
-        // shipped it as the .ttf — that envelope (~298 KB) is now
-        // explicitly outside the lower bound.
+    fn iosevka_remote_pin_is_well_formed() {
+        use crate::cli::fonts::{FontSource, IOSEVKA, IOSEVKA_DOWNLOAD_URL, IOSEVKA_SHA256_PIN};
+
+        // URL is pinned to the official upstream repo at an immutable tag.
         assert!(
-            IOSEVKA_BLOB.len() > 5_000_000 && IOSEVKA_BLOB.len() < 30_000_000,
-            "Iosevka blob size out of expected band: {}",
-            IOSEVKA_BLOB.len()
+            IOSEVKA_DOWNLOAD_URL
+                .starts_with("https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/"),
+            "Iosevka download URL must point at upstream tag v3.4.0"
         );
-        // SFNT magic for TrueType: `00 01 00 00`. Closes the
-        // SHA-pinned-but-still-HTML failure mode end-to-end.
+        assert!(
+            IOSEVKA_DOWNLOAD_URL.ends_with("IosevkaTermNerdFont-Regular.ttf"),
+            "Iosevka download URL must target the Regular TTF file"
+        );
+
+        // SHA-256 pin is a 64-char lowercase hex digest.
         assert_eq!(
-            &IOSEVKA_BLOB[..4],
-            &[0x00, 0x01, 0x00, 0x00],
-            "Iosevka blob is not TrueType (magic bytes mismatch)"
+            IOSEVKA_SHA256_PIN.len(),
+            64,
+            "SHA-256 pin must be 64 hex chars"
         );
-        assert_ne!(IOSEVKA_SHA256, "unknown");
+        assert!(
+            IOSEVKA_SHA256_PIN
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "SHA-256 pin must be lowercase hex"
+        );
+
+        // Iosevka is wired to the Remote source variant.
+        assert!(matches!(IOSEVKA.source, FontSource::Remote { .. }));
     }
 
     /// Nightride FM Monospace TTF measured 9268 bytes at extraction
@@ -588,27 +604,70 @@ mod tests {
         assert_ne!(NIGHTRIDE_FONT_SHA256, "unknown");
     }
 
-    /// Roster sanity: at least Iosevka + Nightride, every entry has
-    /// a non-empty file name + non-empty credit line, and a paired
-    /// license blob/filename so `install-*-font` can ship the grant
-    /// next to the .ttf on the user's disk.
+    /// Roster sanity: at least Iosevka + Nightride, every entry has a non-empty
+    /// file name, display name, credit, and a paired license sidecar. Per-variant
+    /// invariants are enforced separately for Embedded and Remote sources.
     #[test]
     fn installable_fonts_roster_well_formed() {
-        assert!(INSTALLABLE_FONTS.len() >= 2);
+        use crate::cli::fonts::FontSource;
+
         for font in INSTALLABLE_FONTS {
-            assert!(!font.file_name.is_empty(), "missing file_name");
-            assert!(!font.display_name.is_empty(), "missing display_name");
-            assert!(!font.credit.is_empty(), "missing credit");
-            assert!(!font.blob.is_empty(), "empty blob");
-            assert_eq!(font.sha256.len(), 64, "sha256 must be 64 hex chars");
-            let license_name = font
-                .license_file_name
-                .expect("license_file_name required for redistribution");
-            let license_blob = font
-                .license_blob
-                .expect("license_blob required for redistribution");
+            // Common invariants — both source variants.
+            assert_eq!(
+                font.sha256.len(),
+                64,
+                "sha pin wrong length: {}",
+                font.file_name
+            );
+            assert!(
+                font.sha256
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+                "sha pin non-lowercase-hex: {}",
+                font.file_name
+            );
+            assert!(!font.file_name.is_empty());
+            assert!(!font.display_name.is_empty());
+            assert!(!font.credit.is_empty());
+
+            let (Some(license_name), Some(license_blob)) =
+                (font.license_file_name, font.license_blob)
+            else {
+                panic!("font {} missing license sidecar", font.file_name);
+            };
             assert!(license_name.ends_with(".LICENSE.txt"));
-            assert!(!license_blob.is_empty(), "empty license blob");
+            assert!(!license_blob.is_empty());
+
+            // Per-variant invariants.
+            match font.source {
+                FontSource::Embedded { blob } => {
+                    assert!(!blob.is_empty(), "embedded blob empty: {}", font.file_name);
+                    assert!(
+                        blob.len() > 5_000,
+                        "embedded blob suspiciously small: {} ({} bytes)",
+                        font.file_name,
+                        blob.len()
+                    );
+                    assert_eq!(
+                        &blob[..font.magic.len()],
+                        font.magic,
+                        "embedded blob magic mismatch: {}",
+                        font.file_name
+                    );
+                }
+                FontSource::Remote { url } => {
+                    assert!(
+                        url.starts_with("https://"),
+                        "remote URL not HTTPS: {}",
+                        font.file_name
+                    );
+                    assert!(
+                        url.contains("/ryanoasis/nerd-fonts/"),
+                        "remote URL not pointing at official upstream: {}",
+                        font.file_name
+                    );
+                }
+            }
         }
     }
 
@@ -641,6 +700,27 @@ mod tests {
             err.kind(),
             ErrorKind::UnknownArgument | ErrorKind::ArgumentConflict
         ));
+    }
+
+    /// Network-bound e2e: downloads the actual Iosevka TTF from the pinned URL,
+    /// verifies magic + SHA, and checks the expected byte count.
+    /// Kept `#[ignore]`-gated — only runs when explicitly requested via
+    /// `cargo test -- --ignored`. Not part of the default suite (no network in CI).
+    #[test]
+    #[ignore = "network-bound; run via `cargo test -- --ignored`"]
+    fn download_iosevka_e2e_smoke() {
+        use crate::cli::fonts::{
+            IOSEVKA_DOWNLOAD_URL, IOSEVKA_SHA256_PIN, SFNT_MAGIC_TRUETYPE, download_to_bytes,
+        };
+
+        let bytes = download_to_bytes(
+            IOSEVKA_DOWNLOAD_URL,
+            &SFNT_MAGIC_TRUETYPE,
+            IOSEVKA_SHA256_PIN,
+        )
+        .expect("e2e download failed");
+        assert_eq!(bytes.len(), 13_230_756, "downloaded size != pinned size");
+        assert_eq!(&bytes[..4], &[0x00, 0x01, 0x00, 0x00]);
     }
 
     #[test]

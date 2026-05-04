@@ -66,7 +66,7 @@ pub async fn run(
     // Build a minimal one-shot reqwest client; rustls-tls is already in deps.
     let (update_tx, mut update_rx) = oneshot::channel::<Option<String>>();
     let update_client = reqwest::Client::builder()
-        .user_agent(format!("nightride-tui/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(crate::USER_AGENT)
         .build();
     if let Ok(client) = update_client {
         tokio::spawn(async move {

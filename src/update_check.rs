@@ -103,7 +103,7 @@ fn extract_tag_name(body: &str) -> Option<&str> {
 /// ```no_run
 /// # async fn example() {
 /// let client = reqwest::Client::builder()
-///     .user_agent(format!("nightride-tui/{}", env!("CARGO_PKG_VERSION")))
+///     .user_agent(nightride_tui::USER_AGENT)
 ///     .build()
 ///     .unwrap();
 /// if let Some(tag) = nightride_tui::update_check::check_for_update(&client).await {
@@ -114,11 +114,8 @@ fn extract_tag_name(body: &str) -> Option<&str> {
 pub async fn check_for_update(client: &reqwest::Client) -> Option<String> {
     let body = client
         .get(RELEASES_LATEST_URL)
+        // Per-call timeout is a legitimate override; UA flows from the caller-built client.
         .timeout(TIMEOUT)
-        .header(
-            reqwest::header::USER_AGENT,
-            format!("nightride-tui/{}", env!("CARGO_PKG_VERSION")),
-        )
         .send()
         .await
         .ok()?

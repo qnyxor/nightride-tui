@@ -3,14 +3,14 @@
 # nightride-tui
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
-![Version](https://img.shields.io/badge/version-v1.0.0-informational.svg)
+![Version](https://img.shields.io/badge/version-v1.0.2-informational.svg)
 ![Rust](https://img.shields.io/badge/Rust-1.85+-DEA584.svg?logo=rust&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
 ![CI](https://github.com/qnyxor/nightride-tui/actions/workflows/ci.yml/badge.svg)
 ![Lint](https://img.shields.io/badge/lint-clippy-brightgreen.svg)
 
 
-[INSTALL](#-install) · [USE](#-useuse) · [AUTHORS](#-authors) · [LICENSE](#-license) · [GRID](https://nightride.fm)
+[INSTALL](#-install) · [USE](#-use) · [PLATFORMS](#-platforms) · [AUTHORS](#-authors) · [LICENSE](#-license) · [GRID](https://nightride.fm)
 
 > [ `SIGNAL ONLY` ] :: terminal receiver for the [nightride.fm](https://nightride.fm) grid
 
@@ -82,13 +82,16 @@ nightride-tui -h <subcommand>    # contextual help
 ### / OPTIONAL FONTS
 
 ```sh
-nightride-tui install-tui-font          # Iosevka Term Nerd Font
-nightride-tui install-nightride-font    # Nightride FM Monospace by Z
+nightride-tui install-tui-font          # Iosevka Term Nerd Font (TUI render face)
+nightride-tui install-nightride-font    # Nightride FM Monospace by Z (brand display)
 ```
 
-Both ship embedded in the binary, verified by SHA-256 at install time. SHA mismatch aborts the install.
+- **Iosevka Term Nerd Font Regular** — fetched on demand from the upstream repo `raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/` (~13 MB). Verified by SFNT magic bytes + SHA-256 pin before installation. Companion license text travels with the TTF. SIL OFL 1.1 (Belleve Invis + Ryan L McIntyre). Requires network on first run; URL pinned to an immutable tag for reproducibility.
+- **Nightride FM Monospace** — embedded in the binary (9.1 KB). Authored by Z, creator of Nightride FM. Free for personal and commercial use.
 
 ### / STATE + LOGS
+
+State file (per-launch persistence — default station, volume, log level):
 
 | platform | path |
 |---|---|
@@ -96,7 +99,30 @@ Both ship embedded in the binary, verified by SHA-256 at install time. SHA misma
 | Linux | `~/.config/nightride/nightride-tui.md` |
 | fallback | `/tmp/nightride/nightride-tui.md` |
 
-Logs rotate daily, 7-day retention, at `<config-dir>/log/nightride.log.YYYY-MM-DD`.
+Log files (daily-rotated, 7-day retention):
+
+| platform | path |
+|---|---|
+| macOS | `~/Library/Application Support/nexus.qnyxor.nightride/log/nightride.log.YYYY-MM-DD` |
+| Linux | `~/.local/share/nightride/log/nightride.log.YYYY-MM-DD` |
+| fallback | `/tmp/nightride/log/nightride.log.YYYY-MM-DD` |
+
+## // PLATFORMS
+
+| Platform | Status | Notes |
+|---|---|---|
+| Linux x86_64 (gnu/musl) | Supported | Native binaries published |
+| Linux aarch64 (gnu) | Supported | Native binary published |
+| macOS aarch64 (Apple Silicon) | Supported | Native binary published |
+| Windows 11 + WSL2 (WSLg) | Works | Run inside WSL2 shell. Manual font copy required for Windows Terminal. |
+
+For the Windows 11 + WSL2 path, after `install-tui-font` copy the font
+to your Windows fonts directory so Windows Terminal can use it:
+
+```bash
+cp ~/.local/share/fonts/IosevkaTermNerdFont-Regular.ttf \
+   /mnt/c/Users/$USER/AppData/Local/Microsoft/Windows/Fonts/
+```
 
 ## // AUTHORS
 
@@ -111,7 +137,7 @@ Logs rotate daily, 7-day retention, at `<config-dir>/log/nightride.log.YYYY-MM-D
 
 ## // LICENSE
 
-Apache-2.0. See [`LICENSE`](LICENSE). Bundled fonts ship under their own permissive licenses; full third-party attribution lives in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+Apache-2.0. See [`LICENSE`](LICENSE). Bundled font (Nightride FM Monospace) and on-demand font (Iosevka Term Nerd Font, fetched at install time) ship under their own permissive licenses; full third-party attribution lives in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
 
 ---
 

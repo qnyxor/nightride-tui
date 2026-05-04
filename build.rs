@@ -6,37 +6,22 @@
 
 //! Build script.
 //!
-//! 1. Verifies the embedded `assets/IosevkaTermNerdFont-Regular.ttf` against
-//!    a pinned SHA-256 for reproducibility and emits the
-//!    `IOSEVKA_SHA256` env var used by `cargo run --version` and the SYSTEM
-//!    modal.
-//! 2. Verifies the embedded `assets/NightrideFMMonospace.ttf` against a
-//!    pinned SHA-256 (brand-asset integrity; same supply-chain canon as
-//!    Iosevka) and emits `NIGHTRIDE_FONT_SHA256` for runtime verify in
-//!    `cli::install_font`. The TUI does not render with this font; it
-//!    ships only for `install-font` to drop into the user's system.
-//! 3. Emits compile-time vergen metadata (`VERGEN_GIT_SHA`,
+//! 1. Verifies the embedded `assets/NightrideFMMonospace.ttf` against a
+//!    pinned SHA-256 (brand-asset integrity) and emits `NIGHTRIDE_FONT_SHA256`
+//!    for runtime verify in `cli::install_font`. The TUI does not render with
+//!    this font; it ships only for `install-font` to drop into the user's
+//!    system.
+//! 2. Emits compile-time vergen metadata (`VERGEN_GIT_SHA`,
 //!    `VERGEN_RUSTC_SEMVER`, `VERGEN_CARGO_TARGET_TRIPLE`).
+//!
+//! Iosevka Term Nerd Font Regular is no longer embedded. It is fetched
+//! on-demand at `install-tui-font` time from a pinned upstream URL; see
+//! `src/cli/fonts.rs` for the URL and SHA-256 pin.
 //!
 //! If `vergen` fails (e.g. release source zips that ship without `.git`)
 //! we swallow the error so `option_env!` callers fall back to "unknown".
 
 use sha2::{Digest, Sha256};
-
-/// Pinned SHA-256 of `assets/IosevkaTermNerdFont-Regular.ttf`.
-///
-/// Verified at download time. To refresh the asset:
-///
-/// ```sh
-/// make fetch-iosevka          # re-downloads from upstream
-/// shasum -a 256 assets/IosevkaTermNerdFont-Regular.ttf
-/// ```
-///
-/// Paste the new digest here, commit asset + Cargo.lock + this constant
-/// in the same commit so reviewers see the integrity link.
-const IOSEVKA_SHA256_PIN: &str = "d5116846a175ef4a988f61241dd3572d6a9dd3e09d4d168c67954b10783a7880";
-
-const IOSEVKA_PATH: &str = "assets/IosevkaTermNerdFont-Regular.ttf";
 
 /// Pinned SHA-256 of `assets/NightrideFMMonospace.ttf`.
 ///
@@ -50,20 +35,10 @@ const NIGHTRIDE_FONT_SHA256_PIN: &str =
 const NIGHTRIDE_FONT_PATH: &str = "assets/NightrideFMMonospace.ttf";
 
 fn main() {
-    println!("cargo:rerun-if-changed={IOSEVKA_PATH}");
     println!("cargo:rerun-if-changed={NIGHTRIDE_FONT_PATH}");
     // Re-run when the embedded schema template changes; otherwise cargo
     // caches the include_str! payload from a stale revision.
     println!("cargo:rerun-if-changed=nightride-tui.md");
-    verify_asset(
-        IOSEVKA_PATH,
-        IOSEVKA_SHA256_PIN,
-        "IOSEVKA_SHA256",
-        "IOSEVKA_PATH",
-        "make fetch-iosevka",
-        "IOSEVKA_SHA256_PIN",
-        AssetKind::Font,
-    );
     verify_asset(
         NIGHTRIDE_FONT_PATH,
         NIGHTRIDE_FONT_SHA256_PIN,

@@ -12,6 +12,47 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-05-04
+
+### Changed
+
+- `install-tui-font` now downloads Iosevka Term Nerd Font Regular from
+  the official upstream repo (`ryanoasis/nerd-fonts` at tag `v3.4.0`)
+  on first invocation. Three pre-write integrity gates fire before any
+  byte reaches disk: HTTP status, SFNT magic bytes (`00 01 00 00`), and
+  SHA-256 against the pin (`d5116846…7880`, identical to the v1.0.1
+  embedded pin). Atomic rename via `tempfile::NamedTempFile::persist`.
+  Binary slim: ~18 MB → ~5.4 MB stripped.
+
+### Added
+
+- User-Agent attribution `nightride-tui/{version} (+repo URL)` on every
+  HTTP request the binary makes (Iosevka download, update check,
+  Icecast stream). RFC 9110 compliant. Identifies the calling app to
+  upstream operators in their server logs.
+- `tempfile ~3.27.0` dependency for atomic write semantics.
+- `indicatif ~0.18.4` dependency for download progress bar.
+
+### Removed
+
+- Embedded `assets/IosevkaTermNerdFont-Regular.ttf` (~13 MB) from the
+  source tree. Its companion license blob (884 B) remains embedded and
+  is written next to the downloaded TTF on install per OFL 1.1 §2.
+- Redundant per-request `User-Agent` header in `update_check.rs` — UA
+  now flows uniformly from the `Client::builder().user_agent(...)` site.
+- `IOSEVKA_PATH` and `IOSEVKA_SHA256_PIN` constants and the corresponding
+  `verify_asset` invocation in `build.rs`. Nightride FM Mono build-time
+  verification preserved bit-for-bit.
+
+### Hardened
+
+- All `reqwest::Client` builders in the binary now share a single
+  `crate::USER_AGENT` const (compile-time `concat!`). No drift, no
+  runtime allocation.
+- Three independent integrity gates (transport, format, hash) defend
+  the install path. Lessons from the v1.0.1 asset corruption incident
+  applied to the runtime fetch surface.
+
 ## [1.0.1] — 2026-05-04
 
 ### Fixed
@@ -72,6 +113,7 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - Bundled Iosevka Term Nerd Font and Nightride FM Monospace install commands.
 - Curl-pipe installer for macOS arm64 / x86_64 and Linux x86_64 / aarch64.
 
-[Unreleased]: https://github.com/qnyxor/nightride-tui/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/qnyxor/nightride-tui/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/qnyxor/nightride-tui/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/qnyxor/nightride-tui/releases/tag/v1.0.1
 [1.0.0]: https://github.com/qnyxor/nightride-tui/releases/tag/v1.0.0
