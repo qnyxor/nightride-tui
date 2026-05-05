@@ -376,10 +376,8 @@ pub fn run_update() -> crate::error::Result<()> {
     use std::io::IsTerminal;
 
     let use_color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-    let truecolor = use_color
-        && std::env::var("COLORTERM")
-            .map(|v| v == "truecolor" || v == "24bit")
-            .unwrap_or(false);
+    let truecolor =
+        use_color && std::env::var("COLORTERM").is_ok_and(|v| v == "truecolor" || v == "24bit");
     let pink = if truecolor {
         "\x1b[38;2;250;39;93m"
     } else if use_color {
