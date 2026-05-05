@@ -375,8 +375,7 @@ pub fn dispatch(args: &CliArgs) -> &Command {
 pub fn run_update() -> crate::error::Result<()> {
     use std::io::IsTerminal;
 
-    let use_color =
-        std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let use_color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
     let truecolor = use_color
         && std::env::var("COLORTERM")
             .map(|v| v == "truecolor" || v == "24bit")
