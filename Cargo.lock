@@ -1300,7 +1300,7 @@ dependencies = [
 
 [[package]]
 name = "nightride-tui"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "chrono",
  "clap",

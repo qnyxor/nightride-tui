@@ -12,6 +12,22 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-05-05
+
+### Changed
+
+- Canonical install URL switched from
+  `raw.githubusercontent.com/qnyxor/nightride-tui/main/scripts/install.sh`
+  to `sh.nightride-tui.qnyxor.nexus` (Cloudflare Worker Custom Domain —
+  subdomain pattern, no Routes failure-mode, source URL opaque to caller).
+  README curl-pipe instruction and `INSTALL_URL` const (consumed by
+  `nightride-tui update`) updated in lockstep. Behaviour is identical:
+  same script, same SHA pinning, same release pull.
+- `nightride-tui update` success message now hints `hash -r` (bash/zsh) so
+  the user can refresh the shell's binary-lookup cache without opening a
+  new terminal. Avoids the surprise of running an old inode after a
+  successful in-place replace.
+
 ## [1.0.2] — 2026-05-04
 
 ### Changed

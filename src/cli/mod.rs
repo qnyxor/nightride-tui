@@ -330,8 +330,7 @@ pub struct CliArgs {
 }
 
 /// URL of the canonical install script, fetched by `nightride-tui update`.
-pub const INSTALL_URL: &str =
-    "https://raw.githubusercontent.com/qnyxor/nightride-tui/main/scripts/install.sh";
+pub const INSTALL_URL: &str = "https://sh.nightride-tui.qnyxor.nexus";
 
 /// Subcommand dispatch.
 #[derive(Debug, Subcommand)]
@@ -408,7 +407,9 @@ pub fn run_update() -> crate::error::Result<()> {
     let _ = std::fs::remove_file(&tmp);
 
     if exec.success() {
-        println!("[ok] update complete. open a new shell to run the new binary.");
+        println!(
+            "[ok] update complete. open a new shell, or run `hash -r` (bash/zsh) to refresh the binary lookup in this shell."
+        );
         Ok(())
     } else {
         let code = exec.code().unwrap_or(-1);

@@ -1300,7 +1300,7 @@ Used by:
 
 Used by:
 
-- [nightride-tui 1.0.2](https://github.com/qnyxor/nightride-tui)
+- [nightride-tui 1.0.3](https://github.com/qnyxor/nightride-tui)
 
 ```text
                                  Apache License

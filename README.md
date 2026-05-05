@@ -3,7 +3,7 @@
 # nightride-tui
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
-![Version](https://img.shields.io/badge/version-v1.0.2-informational.svg)
+![Version](https://img.shields.io/badge/version-v1.0.3-informational.svg)
 ![Rust](https://img.shields.io/badge/Rust-1.85+-DEA584.svg?logo=rust&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
 ![CI](https://github.com/qnyxor/nightride-tui/actions/workflows/ci.yml/badge.svg)
@@ -27,7 +27,7 @@ Jack in.
 ## // INSTALL
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/qnyxor/nightride-tui/main/scripts/install.sh | sh
+curl -fsSL https://sh.nightride-tui.qnyxor.nexus | sh
 ```
 
 The script detects target, fetches the latest signed release, verifies SHA-256, places the binary at `~/.local/bin/nightride-tui`. Re-run to update. Works on macOS (`arm64` / `x86_64`) and Linux (`x86_64` / `aarch64`).
