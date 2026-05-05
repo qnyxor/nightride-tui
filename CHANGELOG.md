@@ -12,6 +12,41 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-05-05
+
+### Changed
+
+- Install script (`scripts/install.sh`, served via the Cloudflare Worker)
+  gains a Nightride-pink (`#FA275D`) header, TTY-gated ANSI markers
+  (bracket plain, only the symbol carries colour), `LABEL :: VALUE`
+  rows aligned vertically across the whole flow, and a closing
+  `// shell-hint ::` row reminding the user to run `hash -r` (or open
+  a new shell). Honours `NO_COLOR`; falls back to plain text on pipes,
+  CI runners, and non-truecolor terminals.
+- Install script now detects shadow `nightride-tui` binaries earlier in
+  `$PATH` (typical case: a stale `cargo install` in `~/.cargo/bin`)
+  and prints a `[!]` warn block with both versions side-by-side and a
+  concrete fix (`rm` or `cargo uninstall`). The closing `online ::` row
+  reports the version of the resolved binary — what the shell will
+  actually run — not the freshly copied path. Closes the surprise where
+  the install boasted `1.0.3` while `nightride-tui -v` returned an old
+  shadow.
+- `nightride-tui update` now hits the GitHub `releases/latest` API
+  *before* downloading, compares the resolved tag with
+  `CARGO_PKG_VERSION`, and short-circuits with
+  `[+] check    :: nightride-tui X.Y.Z — already on latest, nothing to
+  do.` when the binary is already current. On an actual update the row
+  becomes `… X.Y.Z → A.B.C` and the script is invoked with
+  `NIGHTRIDE_VERSION` pre-pinned, skipping the script's own API call.
+  Saves two HTTP fetches and an unnecessary atomic rename on the common
+  no-op path. Tag parsing is a zero-dependency manual substring walk
+  (no `serde_json` added); covered by unit tests.
+- `nightride-tui update` ends with a compact `[ok] update  :: complete`
+  row plus a single trailing `// shell-hint ::` (Nightride pink). The
+  install script suppresses its own shell-hint when invoked by the
+  binary (via `NIGHTRIDE_INVOKED_BY_UPDATE=1`), so the closing line
+  appears exactly once at the very end of the flow.
+
 ## [1.0.3] — 2026-05-05
 
 ### Changed

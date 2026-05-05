@@ -373,6 +373,71 @@ pub fn dispatch(args: &CliArgs) -> &Command {
 /// be spawned and [`crate::error::NightrideError::ConfigInvalid`] when
 /// either curl or the install script exits with a non-zero status.
 pub fn run_update() -> crate::error::Result<()> {
+    use std::io::IsTerminal;
+
+    let use_color =
+        std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let truecolor = use_color
+        && std::env::var("COLORTERM")
+            .map(|v| v == "truecolor" || v == "24bit")
+            .unwrap_or(false);
+    let pink = if truecolor {
+        "\x1b[38;2;250;39;93m"
+    } else if use_color {
+        "\x1b[35m"
+    } else {
+        ""
+    };
+    let cyan = if use_color { "\x1b[1;36m" } else { "" };
+    let green = if use_color { "\x1b[1;32m" } else { "" };
+    let reset = if use_color { "\x1b[0m" } else { "" };
+
+    let current = env!("CARGO_PKG_VERSION");
+    let current_tag = format!("v{current}");
+
+    // Resolve the latest published release from the GitHub API and skip
+    // the download path entirely when we are already on it. Saves two
+    // HTTP fetches and avoids an unnecessary in-place rename.
+    let api_url = "https://api.github.com/repos/qnyxor/nightride-tui/releases/latest";
+    let api = std::process::Command::new("curl")
+        .arg("-fsSL")
+        .arg("-A")
+        .arg(crate::USER_AGENT)
+        .arg(api_url)
+        .output()
+        .map_err(|e| crate::error::NightrideError::io("cli::update::api_spawn", e))?;
+
+    if !api.status.success() {
+        let code = api.status.code().unwrap_or(-1);
+        return Err(crate::error::NightrideError::config_invalid(
+            "cli::update::api",
+            format!("could not query GitHub releases API (curl exit {code})"),
+        ));
+    }
+
+    let body = String::from_utf8_lossy(&api.stdout);
+    let latest_tag = parse_tag_name(&body).ok_or_else(|| {
+        crate::error::NightrideError::config_invalid(
+            "cli::update::api_parse",
+            "could not parse `tag_name` from GitHub API response",
+        )
+    })?;
+
+    println!();
+    if latest_tag == current_tag {
+        println!(
+            "[{cyan}+{reset}] {:<8} :: nightride-tui {current} — already on latest, nothing to do.",
+            "check"
+        );
+        println!();
+        return Ok(());
+    }
+    println!(
+        "[{cyan}+{reset}] {:<8} :: nightride-tui {current} → {}",
+        "check",
+        latest_tag.trim_start_matches('v')
+    );
+
     let mut tmp = std::env::temp_dir();
     tmp.push(format!("nightride-tui-install-{}.sh", std::process::id()));
 
@@ -398,8 +463,16 @@ pub fn run_update() -> crate::error::Result<()> {
 
     // Execute the downloaded script. `sh` is POSIX-baseline; the
     // install script declares its own `#!/bin/sh` shebang.
+    //
+    // NIGHTRIDE_INVOKED_BY_UPDATE tells install.sh to suppress its
+    // trailing `// shell-hint ::` row — we emit our own closing block
+    // (update :: complete + shell-hint) after the script returns.
+    // NIGHTRIDE_VERSION pins the resolved tag so the script does not
+    // re-query the GitHub API.
     let exec = std::process::Command::new("sh")
         .arg(&tmp)
+        .env("NIGHTRIDE_INVOKED_BY_UPDATE", "1")
+        .env("NIGHTRIDE_VERSION", &latest_tag)
         .status()
         .map_err(|e| crate::error::NightrideError::io("cli::update::sh_spawn", e))?;
 
@@ -407,8 +480,10 @@ pub fn run_update() -> crate::error::Result<()> {
     let _ = std::fs::remove_file(&tmp);
 
     if exec.success() {
+        println!("[{green}ok{reset}] update  :: complete");
+        println!();
         println!(
-            "[ok] update complete. open a new shell, or run `hash -r` (bash/zsh) to refresh the binary lookup in this shell."
+            "{pink}// shell-hint{reset} :: run `hash -r` (bash/zsh) to refresh binary, or open new terminal."
         );
         Ok(())
     } else {
@@ -418,6 +493,23 @@ pub fn run_update() -> crate::error::Result<()> {
             format!("install script exited {code}"),
         ))
     }
+}
+
+/// Extract `tag_name` from a GitHub releases API JSON response.
+///
+/// Manual substring parse — the GitHub `releases/latest` schema is stable
+/// and we want zero extra dependencies for one field. Returns the raw tag
+/// (e.g. `v1.0.4`).
+fn parse_tag_name(json: &str) -> Option<String> {
+    let key = "\"tag_name\"";
+    let start = json.find(key)?;
+    let after_key = &json[start + key.len()..];
+    let colon = after_key.find(':')?;
+    let after_colon = &after_key[colon + 1..];
+    let q1 = after_colon.find('"')?;
+    let after_q1 = &after_colon[q1 + 1..];
+    let q2 = after_q1.find('"')?;
+    Some(after_q1[..q2].to_string())
 }
 
 /// Returns true if a known subcommand help was printed.
@@ -474,11 +566,35 @@ pub fn list_stations() {
 #[cfg(test)]
 mod tests {
     use super::fonts::{INSTALLABLE_FONTS, NIGHTRIDE_FONT_BLOB, NIGHTRIDE_FONT_SHA256};
-    use super::{CliArgs, Command, dispatch};
+    use super::{CliArgs, Command, dispatch, parse_tag_name};
     use crate::error::{NightrideError, Result};
     use crate::station::by_slug;
     use clap::Parser;
     use clap::error::ErrorKind;
+
+    #[test]
+    fn parse_tag_name_extracts_compact() {
+        let json = r#"{"tag_name":"v1.0.4","name":"release"}"#;
+        assert_eq!(parse_tag_name(json).as_deref(), Some("v1.0.4"));
+    }
+
+    #[test]
+    fn parse_tag_name_handles_whitespace() {
+        let json = r#"{ "tag_name" : "v1.0.5" , "name" : "x" }"#;
+        assert_eq!(parse_tag_name(json).as_deref(), Some("v1.0.5"));
+    }
+
+    #[test]
+    fn parse_tag_name_none_when_key_missing() {
+        let json = r#"{"name":"v1.0.4","draft":false}"#;
+        assert_eq!(parse_tag_name(json), None);
+    }
+
+    #[test]
+    fn parse_tag_name_picks_first_occurrence() {
+        let json = r#"{"prerelease":false,"tag_name":"v9.9.9","assets":[{"tag_name":"ignored"}]}"#;
+        assert_eq!(parse_tag_name(json).as_deref(), Some("v9.9.9"));
+    }
 
     fn resolve_station(args: &CliArgs) -> Result<&'static crate::station::Station> {
         let slug = args.station.as_deref().unwrap_or("nightride");

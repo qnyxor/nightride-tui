@@ -47,10 +47,10 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     C_ERR=$(printf '\033[1;31m')    # bright red    →  !!
     case "${COLORTERM:-}" in
         truecolor|24bit)
-            C_HEADER=$(printf '\033[1;38;2;250;39;93m')   # #FA275D
+            C_HEADER=$(printf '\033[38;2;250;39;93m')   # #FA275D, no bold
             ;;
         *)
-            C_HEADER=$(printf '\033[1;35m')               # fallback
+            C_HEADER=$(printf '\033[35m')               # fallback, no bold
             ;;
     esac
     C_DIM=$(printf '\033[2m')
@@ -107,7 +107,7 @@ row_ok() {
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-printf '\n%s// nightride-tui :: install%s\n\n' "$C_HEADER" "$C_RESET"
+printf '\n%s// nightride-tui%s :: install\n\n' "$C_HEADER" "$C_RESET"
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -271,5 +271,12 @@ fi
 # Shell hint, in header style — `hash -r` cannot be auto-applied because
 # it is a builtin of the parent shell, not the subshell that runs this
 # script. Worth a line so the user knows what to do.
-printf '\n%s// shell-hint :: run `hash -r` (bash/zsh) to refresh binary, or open new terminal.%s\n\n' \
-       "$C_HEADER" "$C_RESET"
+#
+# Suppressed when invoked from `nightride-tui update` (v1.0.4+ binary
+# sets NIGHTRIDE_INVOKED_BY_UPDATE=1). The binary emits its own closing
+# row + shell-hint after this script returns, so printing the hint here
+# would push the binary's "update :: complete" row past the hint.
+if [ -z "${NIGHTRIDE_INVOKED_BY_UPDATE:-}" ]; then
+    printf '\n%s// shell-hint%s :: run `hash -r` (bash/zsh) to refresh binary, or open new terminal.\n\n' \
+           "$C_HEADER" "$C_RESET"
+fi
