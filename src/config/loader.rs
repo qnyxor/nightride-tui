@@ -17,6 +17,7 @@
 use std::path::PathBuf;
 
 use serde_norway::Value;
+use tracing::debug;
 
 use crate::{NightrideError, Result};
 
@@ -82,6 +83,8 @@ pub fn load(override_path: Option<PathBuf>) -> Result<Config> {
 /// rest of the library consumes. Each field falls back to its
 /// canonical default when the disk value is missing or empty.
 fn project(raw_cfg: RawConfig) -> Config {
+    let input_format = raw_cfg.audio.input_format.unwrap_or_default();
+    debug!("config: loaded input_format={:?}", input_format);
     Config {
         default_station: raw_cfg
             .audio
@@ -98,6 +101,7 @@ fn project(raw_cfg: RawConfig) -> Config {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(default_log_level),
         log_dir: raw_cfg.app.log_dir,
+        input_format,
     }
 }
 
@@ -225,13 +229,13 @@ pub fn ensure_schema(path: &std::path::Path) -> Result<()> {
 /// First-launch helper: create parent directory if needed and write
 /// the embedded template verbatim.
 fn write_template(path: &std::path::Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|err| NightrideError::Io {
-                op: "config::ensure_schema::mkdir",
-                source: err,
-            })?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|err| NightrideError::Io {
+            op: "config::ensure_schema::mkdir",
+            source: err,
+        })?;
     }
     std::fs::write(path, TEMPLATE).map_err(|err| NightrideError::Io {
         op: "config::ensure_schema::write_template",

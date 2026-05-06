@@ -4,20 +4,26 @@
 // SPDX-FileComment: Part of nightride-tui at <https://github.com/qnyxor/nightride-tui>
 // ---
 
-//! ICY (Icecast / Shoutcast) metadata parser + in-memory history ring.
+//! Metadata module: ICY (Icecast / Shoutcast) and SSE (HLS) parsers.
 //!
-//! Two responsibilities:
+//! Two transport paths:
+//! - **ICY (MP3 mode)**: frame-based metadata from Icecast ICY-metaint headers.
+//!   Frame-based parser + in-memory history ring buffer.
+//! - **SSE (HLS mode)**: push-based JSON from `https://nightride.fm/meta`.
 //!
-//! 1. **Pure parser**: turn the ICY-metaint byte stream into a [`Metadata`]
-//!    record. Defensive: malformed UTF-8 falls back to lossy decoding,
-//!    empty payloads emit `None`, multi-key payloads tolerate any field
-//!    order, and `--`-prefixed garbage cannot inject control characters.
-//! 2. **History ring**: a fixed-capacity [`History`] buffer (10 items by
-//!    default) of recently played tracks. Skips consecutive duplicates so
-//!    a long-running stream does not flood the panel with the same entry.
+//! ## ICY Parser
 //!
+//! Pure parser: turn the ICY-metaint byte stream into a [`Metadata`]
+//! record. Defensive: malformed UTF-8 falls back to lossy decoding,
+//! empty payloads emit `None`, multi-key payloads tolerate any field
+//! order, and `--`-prefixed garbage cannot inject control characters.
+//! History ring: a fixed-capacity [`History`] buffer (10 items by
+//! default) of recently played tracks. Skips consecutive duplicates so
+//! a long-running stream does not flood the panel with the same entry.
 //! IO machinery (interleaving the metadata frames into the audio stream)
 //! lives in `audio.rs`. This module operates on byte slices only.
+
+pub mod sse;
 
 use std::collections::VecDeque;
 use std::time::SystemTime;

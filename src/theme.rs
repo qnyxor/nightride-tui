@@ -222,10 +222,22 @@ pub struct GlyphSet {
     /// Separator between station name, title, and artist on the now-playing
     /// line.
     pub now_separator: &'static str,
-    /// Tuning placeholder shown when no metadata has arrived yet.
+    /// Tuning placeholder shown while audio is still establishing
+    /// (Connecting / Reconnecting) — no sound yet.
     pub tuning_placeholder: &'static str,
+    /// Loading-metadata placeholder shown when audio is streaming but
+    /// the SSE supervisor has not delivered the first now-playing
+    /// payload yet. Distinct from `tuning_placeholder` so the user
+    /// reads "audio is up, metadata is in flight" instead of "still
+    /// connecting".
+    pub metadata_loading_placeholder: &'static str,
     /// Mute label rendered in place of the volume number.
     pub mute_label: &'static str,
+    /// Braille spinner frames cycled while the connection is in a
+    /// loading state (Connecting / Reconnecting). One full rotation =
+    /// `frames.len()` advances; the App schedules a frame every ~125 ms
+    /// at the canonical 30 fps tick rate.
+    pub spinner_frames: &'static [char],
 }
 
 impl Default for GlyphSet {
@@ -234,7 +246,9 @@ impl Default for GlyphSet {
             volume_bar: "|",
             now_separator: "/",
             tuning_placeholder: "tuning…",
+            metadata_loading_placeholder: "loading metadata…",
             mute_label: "MUTE",
+            spinner_frames: &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
         }
     }
 }

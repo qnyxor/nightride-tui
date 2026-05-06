@@ -2,12 +2,12 @@
 
 # nightride-tui
 
-![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
-![Version](https://img.shields.io/badge/version-v1.0.4-informational.svg)
-![Rust](https://img.shields.io/badge/Rust-1.85+-DEA584.svg?logo=rust&logoColor=white)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
-![CI](https://github.com/qnyxor/nightride-tui/actions/workflows/ci.yml/badge.svg)
-![Lint](https://img.shields.io/badge/lint-clippy-brightgreen.svg)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-v1.0.4-informational.svg)](https://github.com/qnyxor/nightride-tui/releases/latest)
+[![Rust](https://img.shields.io/badge/Rust-1.88+-DEA584.svg?logo=rust&logoColor=white)](rust-toolchain.toml)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#-platforms)
+[![CI](https://github.com/qnyxor/nightride-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/qnyxor/nightride-tui/actions/workflows/ci.yml)
+[![Lint](https://img.shields.io/badge/lint-clippy-brightgreen.svg)](clippy.toml)
 
 
 [INSTALL](#-install) · [USE](#-use) · [PLATFORMS](#-platforms) · [AUTHORS](#-authors) · [LICENSE](#-license) · [GRID](https://nightride.fm)
@@ -51,7 +51,7 @@ cd nightride-tui
 make build-release
 ```
 
-Toolchain auto-fetched via `rust-toolchain.toml` (Rust stable, MSRV 1.85). Install rustup if absent: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. Release binary lands at `target/release/nightride-tui`.
+Toolchain auto-fetched via `rust-toolchain.toml` (Rust stable, MSRV 1.88). Install rustup if absent: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. Release binary lands at `target/release/nightride-tui`.
 
 Self-update once installed:
 
@@ -77,7 +77,10 @@ nightride-tui -h <subcommand>    # contextual help
 | `→` / `←` | cycle station |
 | `+` / `-` | volume |
 | `m` | mute / unmute |
+| `t` | toggle transport (MP3 ⇄ HLS) |
 | `Ctrl+C` | disconnect |
+
+**Transport default**: HLS (CMAF/AAC, ABR-ready, mirrors the nightride.fm web player). Press `t` to switch to MP3 in three cases: port 8443 is blocked by your network, you're on a CPU-constrained box where AAC decode is too costly, or you need a clean fallback while debugging an HLS-side issue. Your choice persists in the state file (`audio.input_format`).
 
 ### / OPTIONAL FONTS
 

@@ -7,13 +7,13 @@
 //! Top-right chord chip painted on the dedicated chord row above the
 //! song panel.
 //!
-//! Reading order: `← → stations  m mute  + - volume`. Key letters
-//! (`← →`, `s`, `m`, `+`, `-`, `v`) render in `text_mid_style` so
-//! the actionable glyphs stand out; the label tails (`tations`,
-//! `ute`, `olume`) render in `dim_style`.
+//! Reading order: `← → stations | m mute | + - volume | t type`.
+//! Key letters (`← →`, `m`, `+`, `-`, `t`) render in `text_mid_style`
+//! so the actionable glyphs stand out; the label tails (`tations`,
+//! `ute`, `olume`, `ype`) render in `dim_style`.
 //!
 //! Adaptive collapse: when the right-side budget can't fit the full
-//! form, segments drop right-to-left (volume → mute → nothing).
+//! form, segments drop right-to-left (type → volume → mute → nothing).
 //! The TUI never renders a clipped fragment. Always-on chrome — does
 //! NOT gate on `panel_visibility` so the navigation hint remains
 //! visible during idle / reconnecting.
@@ -59,16 +59,29 @@ pub(super) fn render(frame: &mut ratatui::Frame, chord_row: Rect, app: &App) {
         vec![Span::styled("+ - ", mid), Span::styled("volume", dim)];
     let seg_volume_w: usize = 10;
 
-    let full_w = seg_stations_w + sep_w + seg_mute_w + sep_w + seg_volume_w;
+    let seg_type: Vec<Span<'static>> = vec![Span::styled("t", mid), Span::styled("ype", dim)];
+    let seg_type_w: usize = 4;
+
+    let full_w = seg_stations_w + sep_w + seg_mute_w + sep_w + seg_volume_w + sep_w + seg_type_w;
+    let xl_w = seg_stations_w + sep_w + seg_mute_w + sep_w + seg_volume_w;
     let mid_w = seg_stations_w + sep_w + seg_mute_w;
 
     let (spans, used) = if avail >= full_w {
         let mut s = seg_stations;
         s.extend(sep.clone());
         s.extend(seg_mute);
+        s.extend(sep.clone());
+        s.extend(seg_volume);
+        s.extend(sep);
+        s.extend(seg_type);
+        (s, full_w)
+    } else if avail >= xl_w {
+        let mut s = seg_stations;
+        s.extend(sep.clone());
+        s.extend(seg_mute);
         s.extend(sep);
         s.extend(seg_volume);
-        (s, full_w)
+        (s, xl_w)
     } else if avail >= mid_w {
         let mut s = seg_stations;
         s.extend(sep);

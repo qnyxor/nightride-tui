@@ -115,29 +115,29 @@ async fn main() {
             // booting the full audio + UI pipeline only to fail at
             // config validation, surface the registry table so the
             // user can copy-paste a valid slug.
-            if let Some(slug) = args.station.as_deref() {
-                if slug.is_empty() || station::by_slug(slug).is_none() {
-                    const BOLD: &str = "\x1b[1m";
-                    const UNDER: &str = "\x1b[4m";
-                    const RESET: &str = "\x1b[0m";
-                    const STATION_USAGE_CMD: &str = "nightride-tui";
-                    const STATION_USAGE_FLAGS: &str = "[-s, --station]";
-                    const STATION_USAGE_ARG: &str = "<SLUG>";
-                    eprintln!();
-                    if slug.is_empty() {
-                        eprintln!(
-                            "{BOLD}{UNDER}Usage{RESET}: {BOLD}{STATION_USAGE_CMD}{RESET} {STATION_USAGE_FLAGS} {STATION_USAGE_ARG}"
-                        );
-                    } else {
-                        eprintln!("nightride: unknown station `{slug}`.");
-                        eprintln!(
-                            "{BOLD}{UNDER}Usage{RESET}: {BOLD}{STATION_USAGE_CMD}{RESET} {STATION_USAGE_FLAGS} {STATION_USAGE_ARG}"
-                        );
-                    }
-                    eprintln!();
-                    cli::list_stations();
-                    std::process::exit(2);
+            if let Some(slug) = args.station.as_deref()
+                && (slug.is_empty() || station::by_slug(slug).is_none())
+            {
+                const BOLD: &str = "\x1b[1m";
+                const UNDER: &str = "\x1b[4m";
+                const RESET: &str = "\x1b[0m";
+                const STATION_USAGE_CMD: &str = "nightride-tui";
+                const STATION_USAGE_FLAGS: &str = "[-s, --station]";
+                const STATION_USAGE_ARG: &str = "<SLUG>";
+                eprintln!();
+                if slug.is_empty() {
+                    eprintln!(
+                        "{BOLD}{UNDER}Usage{RESET}: {BOLD}{STATION_USAGE_CMD}{RESET} {STATION_USAGE_FLAGS} {STATION_USAGE_ARG}"
+                    );
+                } else {
+                    eprintln!("nightride: unknown station `{slug}`.");
+                    eprintln!(
+                        "{BOLD}{UNDER}Usage{RESET}: {BOLD}{STATION_USAGE_CMD}{RESET} {STATION_USAGE_FLAGS} {STATION_USAGE_ARG}"
+                    );
                 }
+                eprintln!();
+                cli::list_stations();
+                std::process::exit(2);
             }
             let root = CancellationToken::new();
             install_panic_hook(root.clone());

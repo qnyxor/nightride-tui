@@ -160,7 +160,14 @@ pub(super) fn render(frame: &mut ratatui::Frame, panel_area: Rect, app: &App) {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(uptime, accent));
     }
-    if !song_elapsed.is_empty() {
+    // Song-elapsed shows only while audio is actually streaming; during
+    // tuning / reconnecting / error / idle the field collapses so the
+    // band reads volume / wallclock / uptime without a stale counter.
+    let is_streaming = matches!(
+        app.connection,
+        crate::audio::ConnectionState::Streaming { .. }
+    );
+    if is_streaming && !song_elapsed.is_empty() {
         spans.push(Span::raw("  "));
         // Song elapsed reads in the neutral mid-gray tone — distinct
         // from the dim date head/tz and from the accent uptime, so the

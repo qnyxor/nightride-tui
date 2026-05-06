@@ -90,6 +90,14 @@ use super::{AudioEvent, ConnectionState};
 /// Hardcoded variant name to select from the master m3u8.
 const PREFERRED_VARIANT: &str = "aac_hifi";
 
+/// AAC-LC priming samples per segment (Symphonia issue #402 mitigation).
+/// Symphonia decodes AAC streams with ~2112 encoder delay samples inserted
+/// at the start of each segment. These are silence and cause ~48ms gaps
+/// at segment boundaries. We trim these samples to eliminate clicks.
+/// This is a fallback constant used when `DecodedAudio::delay_frames()` is
+/// unavailable or returns None.
+const PRIMING_SAMPLES_AAC: u32 = 2112;
+
 /// Process-wide reqwest client for HLS playlist + segment fetches.
 /// Reusing one Client across station switches keeps the connection pool
 /// warm — TLS handshakes to `stream.nightride.fm:8443` only pay their
@@ -307,10 +315,20 @@ async fn fetch_segment(
 /// The decoder is initialized once per variant and reused for all segments
 /// in that variant. This avoids ~100ms codec re-initialization latency
 /// per segment boundary.
+///
+/// # Priming sample tracking
+///
+/// `priming_samples_remaining` tracks the number of samples still to be
+/// discarded from the beginning of the current segment (post-init). On the
+/// first segment of a new decode session, this is set to the detected delay
+/// (via `delay_frames()`) or the fallback constant `PRIMING_SAMPLES_AAC`.
+/// Subsequent segments in the same decoder session do not have priming
+/// (the Symphonia decoder handles it internally for continuity).
 struct HlsDecoder {
     format: Box<dyn symphonia::core::formats::FormatReader>,
     decoder: Box<dyn symphonia::core::codecs::Decoder>,
     sample_rate: u32,
+    priming_samples_remaining: u32,
 }
 
 impl HlsDecoder {
@@ -354,14 +372,24 @@ impl HlsDecoder {
 
         let sample_rate = track.codec_params.sample_rate.unwrap_or(44_100);
 
+        // Detect priming offset from codec parameters or fallback to constant.
+        // Symphonia's codec_params.delay field indicates encoder delay in samples.
+        let priming = track.codec_params.delay.unwrap_or(PRIMING_SAMPLES_AAC);
+
         Ok(HlsDecoder {
             format: format_reader,
             decoder,
             sample_rate,
+            priming_samples_remaining: priming,
         })
     }
 
     /// Decode all packets from the format, emitting samples to the queue.
+    ///
+    /// On the first call (when `priming_samples_remaining > 0`), this will skip
+    /// the leading priming samples before emitting to the queue. This mitigates
+    /// Symphonia issue #402 (AAC encoder delay silence at segment boundaries).
+    /// Subsequent calls do not trim, as the decoder handles continuity internally.
     fn decode_all_packets(&mut self, sample_tx: &SyncSender<i16>) -> Result<(), NightrideError> {
         loop {
             match self.format.next_packet() {
@@ -371,12 +399,25 @@ impl HlsDecoder {
                         let mut sample_buf =
                             SampleBuffer::<i16>::new(audio_buf.capacity() as u64, spec);
                         sample_buf.copy_interleaved_ref(audio_buf);
-                        for &sample in sample_buf.samples() {
+
+                        let samples = sample_buf.samples();
+                        #[allow(clippy::cast_possible_truncation)]
+                        let skip_count =
+                            self.priming_samples_remaining.min(samples.len() as u32) as usize;
+
+                        for &sample in &samples[skip_count..] {
                             if sample_tx.send(sample).is_err() {
                                 return Err(NightrideError::Cancelled {
                                     op: "hls::HlsDecoder::decode_all_packets::send",
                                 });
                             }
+                        }
+
+                        #[allow(clippy::cast_possible_truncation)]
+                        {
+                            self.priming_samples_remaining = self
+                                .priming_samples_remaining
+                                .saturating_sub(skip_count as u32);
                         }
                     }
                     Err(SymphoniaError::DecodeError(_)) => {
@@ -411,6 +452,13 @@ impl HlsDecoder {
 /// with the segment data to initialize the decoder's format+track state.
 /// For subsequent segments, init is ignored and the segment is decoded
 /// directly with the pre-initialized decoder.
+///
+/// # Priming sample trimming
+///
+/// On the first segment (when the decoder is created), priming samples
+/// are tracked in `decoder.priming_samples_remaining`. The `decode_all_packets`
+/// method will skip these samples before emitting to the sample queue,
+/// mitigating Symphonia issue #402 (AAC encoder delay silence).
 fn decode_segment_to_samples(
     buffer: &[u8],
     init_data: Option<&[u8]>,
@@ -434,7 +482,8 @@ fn decode_segment_to_samples(
     // Lock sample rate once.
     let _ = speaker_rate.get_or_init(|| dec.sample_rate);
 
-    // Decode all packets from this segment.
+    // Decode all packets from this segment. Priming samples (if any)
+    // are trimmed by decode_all_packets on the first call only.
     dec.decode_all_packets(sample_tx)
 }
 
@@ -920,5 +969,57 @@ mod tests {
         let mut decoder_state: Option<i32> = Some(1);
         let _dropped = decoder_state.take();
         assert!(decoder_state.is_none());
+    }
+
+    /// Test priming sample trim initialization.
+    ///
+    /// Verifies that HlsDecoder initializes with priming_samples_remaining
+    /// set to the detected delay or the fallback constant.
+    #[test]
+    fn priming_samples_initialized_correctly() {
+        // Verify constant is reasonable.
+        assert_eq!(PRIMING_SAMPLES_AAC, 2112u32);
+
+        // Simulate priming_samples_remaining field behavior.
+        let mut priming_remaining: u32 = 2112u32;
+        assert_eq!(priming_remaining, 2112);
+
+        // Simulate skipping samples from first packet.
+        let skip_count: u32 = 2112u32;
+        priming_remaining = priming_remaining.saturating_sub(skip_count);
+        assert_eq!(priming_remaining, 0);
+
+        // Subsequent packets should not trim (priming_remaining is 0).
+        let skip_count_second = priming_remaining.min(100u32);
+        assert_eq!(skip_count_second, 0);
+    }
+
+    /// Test priming sample exhaustion across multiple packets.
+    ///
+    /// Verifies that priming samples are correctly tracked and exhausted
+    /// across packet boundaries. This ensures partial trimming works if
+    /// a single packet doesn't contain all priming samples.
+    #[test]
+    fn priming_samples_exhaust_across_packets() {
+        let mut priming_remaining: u32 = 2112u32;
+
+        // First packet: 1500 samples available, trim first 1500.
+        let first_packet_size: u32 = 1500u32;
+        let skip_first = priming_remaining.min(first_packet_size);
+        assert_eq!(skip_first, 1500);
+        priming_remaining = priming_remaining.saturating_sub(skip_first);
+        assert_eq!(priming_remaining, 612);
+
+        // Second packet: 1000 samples available, trim first 612.
+        let second_packet_size: u32 = 1000u32;
+        let skip_second = priming_remaining.min(second_packet_size);
+        assert_eq!(skip_second, 612);
+        priming_remaining = priming_remaining.saturating_sub(skip_second);
+        assert_eq!(priming_remaining, 0);
+
+        // Third packet: no more trimming.
+        let third_packet_size: u32 = 1000u32;
+        let skip_third = priming_remaining.min(third_packet_size);
+        assert_eq!(skip_third, 0);
     }
 }

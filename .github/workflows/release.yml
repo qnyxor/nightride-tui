@@ -34,6 +34,9 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04
             cross: true
+          - target: x86_64-pc-windows-gnu
+            runner: ubuntu-24.04
+            cross: true
 
     steps:
       - name: Checkout
@@ -101,16 +104,28 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           TARGET="${{ matrix.target }}"
-          ARCHIVE="nightride-tui-${TARGET}.tar.gz"
 
           mkdir -p "dist/${TARGET}"
-          cp "target/${TARGET}/release/nightride-tui" "dist/${TARGET}/nightride-tui"
+
+          # Binary name differs on Windows
+          if [[ "$TARGET" == *"windows"* ]]; then
+            cp "target/${TARGET}/release/nightride-tui.exe" "dist/${TARGET}/nightride-tui.exe"
+            ARCHIVE="nightride-tui-${TARGET}.zip"
+          else
+            cp "target/${TARGET}/release/nightride-tui" "dist/${TARGET}/nightride-tui"
+            ARCHIVE="nightride-tui-${TARGET}.tar.gz"
+          fi
+
           cp LICENSE                   "dist/${TARGET}/LICENSE"
           cp THIRD_PARTY_LICENSES.md   "dist/${TARGET}/THIRD_PARTY_LICENSES.md"
           cp README.md                 "dist/${TARGET}/README.md"
 
-          tar -czf "$ARCHIVE" -C "dist/${TARGET}" \
-              nightride-tui LICENSE THIRD_PARTY_LICENSES.md README.md
+          if [[ "$TARGET" == *"windows"* ]]; then
+            cd "dist/${TARGET}" && zip -r "../../${ARCHIVE}" . && cd ../../..
+          else
+            tar -czf "$ARCHIVE" -C "dist/${TARGET}" \
+                nightride-tui LICENSE THIRD_PARTY_LICENSES.md README.md
+          fi
 
           if command -v shasum >/dev/null 2>&1; then
               shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
@@ -125,6 +140,8 @@ jobs:
           path: |
             nightride-tui-${{ matrix.target }}.tar.gz
             nightride-tui-${{ matrix.target }}.tar.gz.sha256
+            nightride-tui-${{ matrix.target }}.zip
+            nightride-tui-${{ matrix.target }}.zip.sha256
           if-no-files-found: error
 
   release:

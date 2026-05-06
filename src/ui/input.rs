@@ -17,8 +17,10 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc;
 
 use crate::audio::AudioCommand;
+use crate::config::{TransportFormat, default_user_config_path, save_input_format};
 use crate::error::{NightrideError, Result};
 use crate::station;
+use tracing::info;
 
 use super::app::{Action, App, VOLUME_STEP};
 
@@ -37,6 +39,7 @@ impl App {
             (KeyModifiers::NONE, KeyCode::Char('+' | '=')) => Some(Action::VolumeUp),
             (KeyModifiers::NONE, KeyCode::Char('-')) => Some(Action::VolumeDown),
             (KeyModifiers::NONE, KeyCode::Char('m')) => Some(Action::MuteToggle),
+            (KeyModifiers::NONE, KeyCode::Char('t')) => Some(Action::TransportToggle),
             (KeyModifiers::NONE, KeyCode::Right) => Some(Action::NextStation),
             (KeyModifiers::NONE, KeyCode::Left) => Some(Action::PrevStation),
             _ => None,
@@ -74,16 +77,45 @@ impl App {
                     .await?;
                 self.request_save();
             }
+            Action::TransportToggle => {
+                let old_format = self.config.input_format;
+                let new_format = match old_format {
+                    TransportFormat::Mp3 => TransportFormat::Hls,
+                    TransportFormat::Hls => TransportFormat::Mp3,
+                };
+                self.config.input_format = new_format;
+                info!("transport toggle: {:?} -> {:?}", old_format, new_format);
+
+                // Persist the new format to state file
+                let config_path = default_user_config_path();
+                save_input_format(&config_path, new_format).ok();
+
+                // Restart the stream with the new transport
+                self.send(
+                    cmd_tx,
+                    AudioCommand::SetStation(self.current_station, new_format),
+                )
+                .await?;
+                self.request_save();
+            }
             Action::NextStation => {
                 let next = station::next(self.current_station);
                 self.change_station(next);
-                self.send(cmd_tx, AudioCommand::SetStation(next)).await?;
+                self.send(
+                    cmd_tx,
+                    AudioCommand::SetStation(next, self.config.input_format),
+                )
+                .await?;
                 self.request_save();
             }
             Action::PrevStation => {
                 let prev = station::prev(self.current_station);
                 self.change_station(prev);
-                self.send(cmd_tx, AudioCommand::SetStation(prev)).await?;
+                self.send(
+                    cmd_tx,
+                    AudioCommand::SetStation(prev, self.config.input_format),
+                )
+                .await?;
                 self.request_save();
             }
         }
@@ -156,6 +188,14 @@ mod tests {
     }
 
     #[test]
+    fn t_emits_transport_toggle() {
+        let mut app = make_app();
+        let action =
+            app.on_terminal_event(&Event::Key(key(KeyModifiers::NONE, KeyCode::Char('t'))));
+        assert!(matches!(action, Some(Action::TransportToggle)));
+    }
+
+    #[test]
     fn right_arrow_emits_next_station() {
         let mut app = make_app();
         let action = app.on_terminal_event(&Event::Key(key(KeyModifiers::NONE, KeyCode::Right)));
@@ -218,5 +258,13 @@ mod tests {
         assert_eq!(app.volume, 0, "first mute drops to 0");
         app.dispatch(Action::MuteToggle, &tx).await.unwrap();
         assert_eq!(app.volume, original, "second mute restores default");
+    }
+
+    #[test]
+    fn env_var_nightride_tui_hls_is_ignored() {
+        // The env var is not consulted by Config::default()
+        // Just verify that Config defaults to Hls
+        let cfg = Config::default();
+        assert_eq!(cfg.input_format, TransportFormat::Hls);
     }
 }

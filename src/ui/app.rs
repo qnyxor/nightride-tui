@@ -73,6 +73,8 @@ pub enum Action {
     NextStation,
     /// Previous station in the registry order.
     PrevStation,
+    /// Toggle transport format (MP3 ⇄ HLS).
+    TransportToggle,
 }
 
 /// Snapshot of UI state at the moment `run` returns. `lib::run` uses this
@@ -157,6 +159,12 @@ pub struct App {
     /// running binary is already current. Set once by the update-check task
     /// in `ui::run`; never cleared during the session.
     pub update_available: Option<String>,
+    /// Monotonic tick counter for the Braille loading spinner. Advances
+    /// once per `on_tick` call; the rendered glyph is
+    /// `theme.glyphs.spinner_frames[(phase / TICKS_PER_SPINNER_FRAME)
+    /// % len()]`. Keeping the raw counter (instead of the frame index)
+    /// lets the spinner speed change without resetting visual position.
+    pub(crate) spinner_phase: u32,
 }
 
 impl App {
@@ -199,6 +207,7 @@ impl App {
             panel_visibility: 0.0,
             panel_target: 1.0,
             update_available: None,
+            spinner_phase: 0,
         })
     }
 
@@ -349,6 +358,27 @@ impl App {
         }
     }
 
+    /// Current Braille spinner glyph for loading states.
+    pub(crate) fn spinner_glyph(&self) -> char {
+        // 2 ticks per frame at 30 fps tick rate → 15 fps spinner, matches
+        // the cli-spinners "dots" cadence used by opencode / claude-code.
+        const TICKS_PER_FRAME: u32 = 2;
+        let frames = self.theme.glyphs.spinner_frames;
+        if frames.is_empty() {
+            return ' ';
+        }
+        let idx = ((self.spinner_phase / TICKS_PER_FRAME) as usize) % frames.len();
+        frames[idx]
+    }
+
+    /// `true` while audio is establishing or recovering — spinner-eligible.
+    pub(crate) fn is_loading(&self) -> bool {
+        matches!(
+            self.connection,
+            ConnectionState::Connecting { .. } | ConnectionState::Reconnecting { .. }
+        )
+    }
+
     /// Apply a visualizer amplitude frame.
     pub fn on_amp_frame(&mut self, amp: Vec<f32>) {
         self.last_amp = Some(amp);
@@ -359,6 +389,11 @@ impl App {
     /// fade resolution matches `FRAME_RATE`. Idempotent at the target
     /// value: once `panel_visibility == panel_target`, calls are no-ops.
     pub fn on_render_tick(&mut self) {
+        // Spinner phase advances every render frame (30 fps). The
+        // renderer divides by `TICKS_PER_FRAME` to get the visible
+        // cadence, so spinner cadence rides on the render rate, not
+        // the slower bookkeeping tick (4 Hz).
+        self.spinner_phase = self.spinner_phase.wrapping_add(1);
         if (self.panel_visibility - self.panel_target).abs() < PANEL_VISIBILITY_STEP {
             self.panel_visibility = self.panel_target;
             return;
@@ -376,7 +411,9 @@ impl App {
     fn connection_status_text(&self) -> Option<String> {
         match &self.connection {
             ConnectionState::Streaming { .. } => None,
-            ConnectionState::Connecting { .. } => Some("connecting…".to_string()),
+            ConnectionState::Connecting { .. } => {
+                Some(self.theme.glyphs.tuning_placeholder.to_string())
+            }
             ConnectionState::Reconnecting { attempt, .. } => {
                 Some(format!("reconnecting… (attempt {attempt})"))
             }
@@ -395,7 +432,11 @@ impl App {
         let station = self.displayed_station.display_name;
         let sep = self.theme.glyphs.now_separator;
         if let Some(status) = self.connection_status_text() {
-            return format!("[ {station} // {status} ]");
+            return if self.is_loading() {
+                format!("[ {station} // {} {status} ]", self.spinner_glyph())
+            } else {
+                format!("[ {station} // {status} ]")
+            };
         }
         match &self.metadata {
             Some(md) if md.title.is_some() || md.artist.is_some() => {
@@ -403,7 +444,11 @@ impl App {
                 let artist = md.artist.as_deref().unwrap_or("?");
                 format!("[ {station} // {artist} {sep} {title} ]")
             }
-            _ => format!("[ {station} // {} ]", self.theme.glyphs.tuning_placeholder),
+            _ => format!(
+                "[ {station} // {} {} ]",
+                self.spinner_glyph(),
+                self.theme.glyphs.metadata_loading_placeholder,
+            ),
         }
     }
 
@@ -424,7 +469,10 @@ impl App {
                 let artist = md.artist.as_deref().unwrap_or("?");
                 format!("{station}//{artist}{sep}{title}")
             }
-            _ => format!("{station}//{}", self.theme.glyphs.tuning_placeholder),
+            _ => format!(
+                "{station}//{}",
+                self.theme.glyphs.metadata_loading_placeholder,
+            ),
         }
     }
 
@@ -451,13 +499,17 @@ impl App {
         let accent = self.theme.accent_style(self.displayed_station);
         let neutral = self.theme.text_neutral_style();
         if let Some(status) = self.connection_status_text() {
-            return vec![
+            let mut out = vec![
                 ("[ ".to_string(), accent),
                 (station.to_string(), accent),
                 (" // ".to_string(), accent),
-                (status, neutral),
-                (" ]".to_string(), accent),
             ];
+            if self.is_loading() {
+                out.push((format!("{} ", self.spinner_glyph()), accent));
+            }
+            out.push((status, neutral));
+            out.push((" ]".to_string(), accent));
+            return out;
         }
         match &self.metadata {
             Some(md) if md.title.is_some() || md.artist.is_some() => {
@@ -473,10 +525,17 @@ impl App {
                     (" ]".to_string(), accent),
                 ]
             }
-            _ => vec![(
-                format!("[ {station} // {} ]", self.theme.glyphs.tuning_placeholder),
-                accent,
-            )],
+            _ => vec![
+                ("[ ".to_string(), accent),
+                (station.to_string(), accent),
+                (" // ".to_string(), accent),
+                (format!("{} ", self.spinner_glyph()), accent),
+                (
+                    self.theme.glyphs.metadata_loading_placeholder.to_string(),
+                    neutral,
+                ),
+                (" ]".to_string(), accent),
+            ],
         }
     }
 }

@@ -31,7 +31,7 @@
 use std::path::PathBuf;
 
 use directories::ProjectDirs;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{NightrideError, Result, station};
 
@@ -39,7 +39,18 @@ mod loader;
 mod persist;
 
 pub use loader::{ensure_schema, load};
-pub use persist::save_state;
+pub use persist::{save_input_format, save_state};
+
+/// Supported audio transport formats.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TransportFormat {
+    /// MP3 codec.
+    Mp3,
+    /// HLS (HTTP Live Streaming) format.
+    #[default]
+    Hls,
+}
 
 /// Canonical user-dir location of `nightride-tui.md`. On macOS:
 /// `~/Library/Application Support/nexus.qnyxor.nightride/nightride-tui.md`;
@@ -80,6 +91,8 @@ pub struct Config {
     /// Override directory for log output. `None` resolves to the platform
     /// state dir via `directories` at logging init time.
     pub log_dir: Option<PathBuf>,
+    /// Audio input format (MP3 or HLS).
+    pub input_format: TransportFormat,
 }
 
 impl Default for Config {
@@ -101,6 +114,7 @@ impl Default for Config {
             default_volume: default_volume(),
             log_level: default_log_level(),
             log_dir: None,
+            input_format: TransportFormat::default(),
         }
     }
 }
@@ -130,6 +144,8 @@ pub(super) struct AudioSection {
     pub(super) default_station: Option<String>,
     #[serde(default)]
     pub(super) default_volume_percent: Option<u8>,
+    #[serde(default)]
+    pub(super) input_format: Option<TransportFormat>,
 }
 
 pub(super) fn default_station() -> String {

@@ -54,6 +54,7 @@
 use std::time::Instant;
 
 pub(crate) mod decode;
+pub(crate) mod hls;
 pub(crate) mod http;
 pub(crate) mod reconnect;
 pub(crate) mod source;
@@ -61,6 +62,7 @@ pub(crate) mod supervisor;
 
 pub(crate) use supervisor::supervisor;
 
+use crate::config::TransportFormat;
 use crate::station::Station;
 
 /// Commands the UI sends to the audio supervisor.
@@ -70,8 +72,8 @@ pub enum AudioCommand {
     Play(&'static Station),
     /// Set output volume in 0..=100 percent. Clamped on receipt.
     SetVolume(u8),
-    /// Switch to a different station.
-    SetStation(&'static Station),
+    /// Switch to a different station with the given input format.
+    SetStation(&'static Station, TransportFormat),
 }
 
 /// Events the audio supervisor emits to the UI.

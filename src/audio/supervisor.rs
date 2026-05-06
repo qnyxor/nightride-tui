@@ -36,10 +36,12 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
+use crate::config::TransportFormat;
 use crate::error::NightrideError;
 use crate::station::Station;
 
 use super::decode::decode_loop;
+use super::hls::hls_decode_loop;
 use super::source::{
     DEFAULT_CHANNELS, DEFAULT_SAMPLE_RATE, DecodedSource, INITIAL_VOLUME_PCT, VisualizerSource,
     vol_to_gain,
@@ -64,10 +66,14 @@ pub(crate) const READY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub(crate) const FADE_STEPS: u16 = 20;
 
 /// Bounded sample queue capacity between the decode thread and the
-/// rodio audio thread. ~46 ms @ 44.1 kHz stereo matches the pre-roll
-/// envelope, so the worst-case bleed window on a station switch is
-/// bounded by the same envelope as the mute / unmute gate.
-pub(crate) const SAMPLE_QUEUE_CAP: usize = 4_096;
+/// rodio audio thread. Sized to ~2 s @ 44.1 kHz stereo (interleaved i16,
+/// so 176 400 samples). MP3 streams continuous so a small queue suffices,
+/// but HLS pauses while fetching the next playlist + first segment of
+/// the next batch — combined ~500–700 ms in the worst case. 2 s of
+/// headroom hides those refreshes with margin to spare. ~352 KB RAM.
+/// On station switch the supervisor drains via `sink.clear()` and the
+/// `MUTE_DRAIN_GUARD` envelope still bounds the bleed window.
+pub(crate) const SAMPLE_QUEUE_CAP: usize = 176_400;
 
 /// Supervisor task. Owns the rodio output stream + sink and the active
 /// stream task lifetime.
@@ -158,7 +164,55 @@ pub async fn supervisor(
             cmd = cmd_rx.recv() => {
                 let Some(cmd) = cmd else { break };
                 match cmd {
-                    AudioCommand::Play(st) | AudioCommand::SetStation(st) => {
+                    AudioCommand::Play(st) => {
+                        // Mute FIRST. `sink.clear()` is blocking and
+                        // cpal's hardware ring keeps draining whatever
+                        // was pre-fetched at the old volume — setting
+                        // volume=0 here makes those trailing samples
+                        // silent so the user never hears them.
+                        sink.set_volume(0.0);
+                        tokio::time::sleep(MUTE_DRAIN_GUARD).await;
+                        // Cancel the previous stream task; clear the sink
+                        // so the new source plays from the front.
+                        if let Some(t) = current_stream_token.take() { t.cancel(); }
+                        sink.clear();
+                        sink.play();
+
+                        let stream_token = token.child_token();
+                        let ready_flag = Arc::new(AtomicBool::new(false));
+                        // Use default format for Play command
+                        match attach_stream(
+                            st,
+                            &sink,
+                            evt_tx.clone(),
+                            amp_tx.clone(),
+                            visualizer_width.clone(),
+                            &speaker_rate,
+                            ready_flag.clone(),
+                            stream_token.clone(),
+                            TransportFormat::default(),
+                        ).await {
+                            Ok(()) => {
+                                current_stream_token = Some(stream_token);
+                                current_station = Some(st);
+                                current_ready_flag = Some(ready_flag);
+                                volume_pending_restore = true;
+                            }
+                            Err(err) => {
+                                // No flag to gate on — restore volume
+                                // immediately so the next Play is audible.
+                                sink.set_volume(vol_to_gain(current_volume));
+                                emit_audio_error(&evt_tx, err.to_string()).await;
+                                let _ = evt_tx.send(AudioEvent::ConnectionState(
+                                    ConnectionState::Error {
+                                        station: st.slug,
+                                        detail: err.to_string(),
+                                    },
+                                )).await;
+                            }
+                        }
+                    }
+                    AudioCommand::SetStation(st, input_format) => {
                         // Mute FIRST. `sink.clear()` is blocking and
                         // cpal's hardware ring keeps draining whatever
                         // was pre-fetched at the old volume — setting
@@ -183,6 +237,7 @@ pub async fn supervisor(
                             &speaker_rate,
                             ready_flag.clone(),
                             stream_token.clone(),
+                            input_format,
                         ).await {
                             Ok(()) => {
                                 current_stream_token = Some(stream_token);
@@ -218,13 +273,12 @@ pub async fn supervisor(
                 }
             }
             _ = ready_tick.tick() => {
-                if volume_pending_restore {
-                    if let Some(flag) = current_ready_flag.as_ref() {
-                        if flag.load(Ordering::Acquire) {
-                            sink.set_volume(vol_to_gain(current_volume));
-                            volume_pending_restore = false;
-                        }
-                    }
+                if volume_pending_restore
+                    && let Some(flag) = current_ready_flag.as_ref()
+                    && flag.load(Ordering::Acquire)
+                {
+                    sink.set_volume(vol_to_gain(current_volume));
+                    volume_pending_restore = false;
                 }
             }
         }
@@ -273,6 +327,7 @@ async fn attach_stream(
     speaker_rate: &OnceLock<u32>,
     ready_flag: Arc<AtomicBool>,
     stream_token: CancellationToken,
+    input_format: TransportFormat,
 ) -> Result<(), NightrideError> {
     let _ = evt_tx
         .send(AudioEvent::ConnectionState(ConnectionState::Connecting {
@@ -304,9 +359,11 @@ async fn attach_stream(
         };
     sink.append(final_source);
 
+    // Use the input format from config (MP3 or HLS).
+    let use_hls = input_format == TransportFormat::Hls;
+
     // Spawn the decode thread. It owns the HTTP body, the symphonia
     // decoder, and the sample_tx end of the queue.
-    let url = station.stream_mp3.to_string();
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_thread = stop_flag.clone();
     let evt_tx_thread = evt_tx.clone();
@@ -314,16 +371,47 @@ async fn attach_stream(
     let speaker_rate_thread = speaker_rate.clone();
 
     std::thread::spawn(move || {
-        decode_loop(
-            url,
-            sample_tx,
-            stop_flag_thread,
-            evt_tx_thread,
-            station_slug,
-            speaker_rate_thread,
-            ready_flag,
-        );
+        if use_hls {
+            debug!(station = station_slug, "attach_stream: using HLS path");
+            let hls_url = station.stream_hls.to_string();
+            hls_decode_loop(
+                hls_url,
+                sample_tx,
+                stop_flag_thread,
+                evt_tx_thread,
+                station_slug,
+                speaker_rate_thread,
+                ready_flag,
+            );
+        } else {
+            debug!(station = station_slug, "attach_stream: using MP3 path");
+            let mp3_url = station.stream_mp3.to_string();
+            decode_loop(
+                mp3_url,
+                sample_tx,
+                stop_flag_thread,
+                evt_tx_thread,
+                station_slug,
+                speaker_rate_thread,
+                ready_flag,
+            );
+        }
     });
+
+    // If HLS mode is active, spawn the SSE metadata supervisor.
+    // The task runs in a tokio::spawn and is cancelled when the stream
+    // detaches (via stream_token cancellation).
+    if use_hls {
+        debug!(
+            station = station.slug,
+            "attach_stream: spawning SSE metadata supervisor"
+        );
+        let evt_tx_sse = evt_tx.clone();
+        let sse_token = stream_token.child_token();
+        tokio::spawn(async move {
+            crate::metadata::sse::spawn_sse_supervisor(evt_tx_sse, station_slug, sse_token).await;
+        });
+    }
 
     // Bridge the cancellation token to the AtomicBool so a child cancel
     // unwinds the decode thread.
@@ -359,6 +447,6 @@ mod tests {
         assert_eq!(MUTE_DRAIN_GUARD, Duration::from_millis(100));
         assert_eq!(READY_POLL_INTERVAL, Duration::from_millis(50));
         assert_eq!(FADE_STEPS, 20);
-        assert_eq!(SAMPLE_QUEUE_CAP, 4_096);
+        assert_eq!(SAMPLE_QUEUE_CAP, 176_400);
     }
 }

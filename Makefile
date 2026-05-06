@@ -1,3 +1,8 @@
+# ---
+# SPDX-FileCopyrightText: (c) 2026 QNYXOR <qnyxor@pm.me> <https://qnyxor.nexus>
+# SPDX-License-Identifier: Apache-2.0
+# ---
+
 # NightRideTUI Makefile.
 # Wraps the Rust toolchain entry points required by ghost-standard-rust §9.
 

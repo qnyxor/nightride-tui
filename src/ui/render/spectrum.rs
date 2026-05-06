@@ -14,6 +14,8 @@
 
 use ratatui::layout::Rect;
 use ratatui::symbols::Marker;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::Paragraph;
 use ratatui::widgets::canvas::{Canvas, Points};
 
 use super::super::app::App;
@@ -44,7 +46,10 @@ const SPECTRUM_BOTTOM_ROW_FACTOR: f32 = 0.3;
 /// `INTENSITY_CAP × (BOTTOM_ROW_FACTOR + GRADIENT_RANGE)` alpha.
 const SPECTRUM_GRADIENT_RANGE: f32 = 0.7;
 
-/// Render the Braille spectrum.
+/// Width of the format-prefix label in cells: "MP3 " or "HLS " = 4 cols.
+pub(super) const PREFIX_WIDTH: u16 = 4;
+
+/// Render the Braille spectrum with a format-prefix label.
 #[allow(
     clippy::too_many_lines,
     reason = "canvas paint closure captures usable_top, row_colors, and the \
@@ -55,8 +60,38 @@ pub(super) fn render(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     if app.panel_hidden() || area.width == 0 || area.height == 0 {
         return;
     }
+
+    // Render the format prefix label in the left 4 columns:
+    // <FMT> in the active station's accent + 1-cell trailing space.
+    if area.height > 0 && area.width > 0 {
+        let label = match app.config.input_format {
+            crate::config::TransportFormat::Mp3 => "MP3 ",
+            crate::config::TransportFormat::Hls => "HLS ",
+        };
+        let accent_color = app.theme.accent_for(app.displayed_station);
+        let label_style = ratatui::style::Style::default().fg(accent_color);
+        let prefix_line = Line::from(Span::styled(label, label_style));
+        let prefix_para = Paragraph::new(prefix_line);
+        let prefix_rect = Rect {
+            x: area.x,
+            y: area.y.saturating_add(area.height.saturating_sub(1)),
+            width: PREFIX_WIDTH.min(area.width),
+            height: 1,
+        };
+        frame.render_widget(prefix_para, prefix_rect);
+    }
+    // Gate the bars on Streaming state: while connecting / reconnecting
+    // there is no real audio yet, so the silhouette is misleading.
+    if !matches!(
+        app.connection,
+        crate::audio::ConnectionState::Streaming { .. }
+    ) {
+        return;
+    }
     let alpha = app.panel_visibility;
-    let cols = usize::from(area.width).max(1);
+    // Adjust for the prefix: canvas starts at column 5 (after "MP3 " or "HLS ")
+    let canvas_width = area.width.saturating_sub(PREFIX_WIDTH);
+    let cols = usize::from(canvas_width).max(1);
     let zero_fallback;
     let amps: &[f32] = if let Some(v) = app.last_amp.as_ref() {
         v.as_slice()
@@ -77,7 +112,7 @@ pub(super) fn render(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     // Y origin is at the BOTTOM with y_bounds[0]=0; filling from
     // the TOP downward draws the silhouette as a stalactite hanging
     // from the area's ceiling.
-    let max_sub_x = f64::from(area.width) * 2.0;
+    let max_sub_x = f64::from(canvas_width) * 2.0;
     let max_sub_y = f64::from(area.height) * 4.0;
     #[allow(
         clippy::cast_possible_truncation,
@@ -181,7 +216,14 @@ pub(super) fn render(frame: &mut ratatui::Frame, area: Rect, app: &App) {
                 });
             }
         });
-    frame.render_widget(canvas, area);
+    // Render canvas in the area to the right of the prefix (after column 7).
+    let canvas_area = Rect {
+        x: area.x.saturating_add(PREFIX_WIDTH),
+        y: area.y,
+        width: canvas_width,
+        height: area.height,
+    };
+    frame.render_widget(canvas, canvas_area);
 }
 
 /// Catmull-Rom interpolation across `samples` at fractional index
@@ -228,4 +270,29 @@ fn catmull_rom_at(samples: &[f32], frac: f64) -> f32 {
         + (-p0 + p2) * t
         + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
         + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::TransportFormat;
+
+    #[test]
+    fn spectrum_prefix_label_for_mp3() {
+        let label = match TransportFormat::Mp3 {
+            TransportFormat::Mp3 => "MP3 ",
+            TransportFormat::Hls => "HLS ",
+        };
+        assert_eq!(label, "MP3 ");
+        assert_eq!(label.len(), super::PREFIX_WIDTH as usize);
+    }
+
+    #[test]
+    fn spectrum_prefix_label_for_hls() {
+        let label = match TransportFormat::Hls {
+            TransportFormat::Mp3 => "MP3 ",
+            TransportFormat::Hls => "HLS ",
+        };
+        assert_eq!(label, "HLS ");
+        assert_eq!(label.len(), super::PREFIX_WIDTH as usize);
+    }
 }

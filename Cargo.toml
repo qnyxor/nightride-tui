@@ -8,7 +8,7 @@
 name = "nightride-tui"
 version = "1.0.4"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 authors = ["QNYXOR <qnyxor@pm.me>"]
 license = "Apache-2.0"
 description = "Terminal user interface client for the nightride.fm synthwave streams."
@@ -79,7 +79,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signa
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 reqwest = { version = "~0.12.28", default-features = false, features = ["rustls-tls", "blocking"] }
-symphonia = { version = "~0.5.5", default-features = false, features = ["mp3"] }
+symphonia = { version = "~0.5.5", default-features = false, features = ["aac", "isomp4", "mp3"] }
 rodio = { version = "0.20", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_norway = "~0.9.42"
@@ -99,10 +99,16 @@ tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
 #   indicatif  -> progress display for long-running CLI operations (no default extras).
 tempfile = "~3.27.0"
 indicatif = { version = "~0.18.4", default-features = false }
+m3u8-rs = "6.0.0"
+reqwest-eventsource = "0.6.0"
+serde_json = "1"
 
 [build-dependencies]
 vergen = { version = "8", features = ["git", "gitcl", "rustc", "cargo"] }
 sha2 = "0.10"
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+embed-resource = "3.0.9"
 
 [dev-dependencies]
 # tokio test-util enables `pause`/`advance` for virtual-time tests.
