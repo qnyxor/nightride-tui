@@ -310,181 +310,136 @@ async fn fetch_segment(
         .map_err(|e| NightrideError::network("hls::fetch_segment::body", e))
 }
 
-/// Persistent HLS decoder state across segments.
+/// Decode AAC frames from one fMP4 segment, prepending the cached init
+/// segment so symphonia can build a complete `FormatReader` per call.
 ///
-/// The decoder is initialized once per variant and reused for all segments
-/// in that variant. This avoids ~100ms codec re-initialization latency
-/// per segment boundary.
+/// # Why per-segment decoder
 ///
-/// # Priming sample tracking
+/// We use a fresh `FormatReader` + `Decoder` per segment because
+/// symphonia's `FormatReader` consumes a contiguous `MediaSourceStream`
+/// (not a streaming source). Persisting the reader across segments was
+/// attempted (M1 v1.1.0) but was unworkable: after the first segment
+/// drained, `next_packet()` returned EOF on the cursor and subsequent
+/// segments were never decoded → audio dropped to silence after ~5 s.
 ///
-/// `priming_samples_remaining` tracks the number of samples still to be
-/// discarded from the beginning of the current segment (post-init). On the
-/// first segment of a new decode session, this is set to the detected delay
-/// (via `delay_frames()`) or the fallback constant `PRIMING_SAMPLES_AAC`.
-/// Subsequent segments in the same decoder session do not have priming
-/// (the Symphonia decoder handles it internally for continuity).
-struct HlsDecoder {
-    format: Box<dyn symphonia::core::formats::FormatReader>,
-    decoder: Box<dyn symphonia::core::codecs::Decoder>,
-    sample_rate: u32,
-    priming_samples_remaining: u32,
-}
-
-impl HlsDecoder {
-    /// Initialize a new decoder from init + first segment data.
-    ///
-    /// The init segment contains the fMP4 `moov` box (codec params);
-    /// the first media segment provides the first `mdat` box (frames).
-    /// Both are prepended to form a valid fMP4 stream for probing.
-    fn new(init_data: &[u8], first_segment_data: &[u8]) -> Result<Self, NightrideError> {
-        let combined = {
-            let mut v = Vec::with_capacity(init_data.len() + first_segment_data.len());
-            v.extend_from_slice(init_data);
-            v.extend_from_slice(first_segment_data);
-            v
-        };
-
-        let cursor = Cursor::new(combined);
-        let mss = MediaSourceStream::new(Box::new(cursor), MediaSourceStreamOptions::default());
-
-        let mut hint = Hint::new();
-        hint.with_extension("m4s");
-
-        let probed = symphonia::default::get_probe()
-            .format(
-                &hint,
-                mss,
-                &FormatOptions::default(),
-                &MetadataOptions::default(),
-            )
-            .map_err(|e| NightrideError::decode("hls::HlsDecoder::new::probe", e))?;
-
-        let format_reader = probed.format;
-
-        let track = format_reader.default_track().ok_or_else(|| {
-            NightrideError::config_invalid("hls::HlsDecoder::new", "no audio track in init segment")
-        })?;
-
-        let decoder = symphonia::default::get_codecs()
-            .make(&track.codec_params, &DecoderOptions::default())
-            .map_err(|e| NightrideError::decode("hls::HlsDecoder::new::decoder", e))?;
-
-        let sample_rate = track.codec_params.sample_rate.unwrap_or(44_100);
-
-        // Detect priming offset from codec parameters or fallback to constant.
-        // Symphonia's codec_params.delay field indicates encoder delay in samples.
-        let priming = track.codec_params.delay.unwrap_or(PRIMING_SAMPLES_AAC);
-
-        Ok(HlsDecoder {
-            format: format_reader,
-            decoder,
-            sample_rate,
-            priming_samples_remaining: priming,
-        })
-    }
-
-    /// Decode all packets from the format, emitting samples to the queue.
-    ///
-    /// On the first call (when `priming_samples_remaining > 0`), this will skip
-    /// the leading priming samples before emitting to the queue. This mitigates
-    /// Symphonia issue #402 (AAC encoder delay silence at segment boundaries).
-    /// Subsequent calls do not trim, as the decoder handles continuity internally.
-    fn decode_all_packets(&mut self, sample_tx: &SyncSender<i16>) -> Result<(), NightrideError> {
-        loop {
-            match self.format.next_packet() {
-                Ok(packet) => match self.decoder.decode(&packet) {
-                    Ok(audio_buf) => {
-                        let spec = *audio_buf.spec();
-                        let mut sample_buf =
-                            SampleBuffer::<i16>::new(audio_buf.capacity() as u64, spec);
-                        sample_buf.copy_interleaved_ref(audio_buf);
-
-                        let samples = sample_buf.samples();
-                        #[allow(clippy::cast_possible_truncation)]
-                        let skip_count =
-                            self.priming_samples_remaining.min(samples.len() as u32) as usize;
-
-                        for &sample in &samples[skip_count..] {
-                            if sample_tx.send(sample).is_err() {
-                                return Err(NightrideError::Cancelled {
-                                    op: "hls::HlsDecoder::decode_all_packets::send",
-                                });
-                            }
-                        }
-
-                        #[allow(clippy::cast_possible_truncation)]
-                        {
-                            self.priming_samples_remaining = self
-                                .priming_samples_remaining
-                                .saturating_sub(skip_count as u32);
-                        }
-                    }
-                    Err(SymphoniaError::DecodeError(_)) => {
-                        debug!("hls: skipping malformed packet");
-                    }
-                    Err(e) => {
-                        return Err(NightrideError::decode(
-                            "hls::HlsDecoder::decode_all_packets::decode",
-                            e,
-                        ));
-                    }
-                },
-                Err(SymphoniaError::IoError(_)) => {
-                    break;
-                }
-                Err(e) => {
-                    return Err(NightrideError::decode(
-                        "hls::HlsDecoder::decode_all_packets::next_packet",
-                        e,
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Decode AAC frames from a fMP4 segment using a persistent decoder.
-///
-/// The decoder must be provided by the caller and will be reused across
-/// segments. For the first segment, pass `init_data` which will be combined
-/// with the segment data to initialize the decoder's format+track state.
-/// For subsequent segments, init is ignored and the segment is decoded
-/// directly with the pre-initialized decoder.
+/// The cost of per-segment recreation is ~100 ms of codec init per
+/// boundary, hidden by the 2 s sample queue (`SAMPLE_QUEUE_CAP` in
+/// `super::supervisor`) — buffer drains while decode warms up, refills
+/// once samples flow.
 ///
 /// # Priming sample trimming
 ///
-/// On the first segment (when the decoder is created), priming samples
-/// are tracked in `decoder.priming_samples_remaining`. The `decode_all_packets`
-/// method will skip these samples before emitting to the sample queue,
-/// mitigating Symphonia issue #402 (AAC encoder delay silence).
+/// On every new decoder, AAC introduces ~2112 priming samples (encoder
+/// delay) of silence (see Symphonia issue #402). We discard them per
+/// segment by tracking `priming_samples_remaining` locally; once 0, the
+/// rest of the segment passes through. Without this trim, every boundary
+/// would emit ~48 ms of silence, surfacing as audible microcuts.
+///
+/// True decoder persistence (one `FormatReader` fed with appended mdat
+/// boxes) requires a custom streaming `MediaSource`; deferred to v1.1.1.
 fn decode_segment_to_samples(
     buffer: &[u8],
     init_data: Option<&[u8]>,
-    decoder: &mut Option<HlsDecoder>,
     sample_tx: &SyncSender<i16>,
     speaker_rate: &OnceLock<u32>,
 ) -> Result<(), NightrideError> {
-    // Initialize decoder on first segment.
-    if decoder.is_none() {
-        let init = init_data.ok_or_else(|| {
-            NightrideError::config_invalid(
-                "hls::decode_segment_to_samples",
-                "init segment required for first segment",
-            )
-        })?;
-        *decoder = Some(HlsDecoder::new(init, buffer)?);
+    // Build a contiguous fMP4 stream: init (`moov` codec params) +
+    // segment (`mdat` frames). When init is missing (rare, defensive),
+    // try the segment alone — symphonia will probably fail probing, and
+    // the caller decides whether to re-fetch the init.
+    let combined: Vec<u8> = match init_data {
+        Some(init) => {
+            let mut v = Vec::with_capacity(init.len() + buffer.len());
+            v.extend_from_slice(init);
+            v.extend_from_slice(buffer);
+            v
+        }
+        None => buffer.to_vec(),
+    };
+
+    let cursor = Cursor::new(combined);
+    let mss = MediaSourceStream::new(Box::new(cursor), MediaSourceStreamOptions::default());
+
+    let mut hint = Hint::new();
+    hint.with_extension("m4s");
+
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| NightrideError::decode("hls::decode_segment_to_samples::probe", e))?;
+
+    let mut format = probed.format;
+
+    let track = format.default_track().ok_or_else(|| {
+        NightrideError::config_invalid(
+            "hls::decode_segment_to_samples",
+            "no audio track in segment",
+        )
+    })?;
+
+    let codec_params = track.codec_params.clone();
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&codec_params, &DecoderOptions::default())
+        .map_err(|e| NightrideError::decode("hls::decode_segment_to_samples::decoder", e))?;
+
+    let sample_rate = codec_params.sample_rate.unwrap_or(44_100);
+    let _ = speaker_rate.get_or_init(|| sample_rate);
+
+    // Priming offset: prefer codec_params.delay if exposed, otherwise
+    // fall back to the AAC-LC standard 2112 (Symphonia issue #402).
+    let mut priming_remaining = codec_params.delay.unwrap_or(PRIMING_SAMPLES_AAC);
+
+    loop {
+        match format.next_packet() {
+            Ok(packet) => match decoder.decode(&packet) {
+                Ok(audio_buf) => {
+                    let spec = *audio_buf.spec();
+                    let mut sample_buf =
+                        SampleBuffer::<i16>::new(audio_buf.capacity() as u64, spec);
+                    sample_buf.copy_interleaved_ref(audio_buf);
+
+                    let samples = sample_buf.samples();
+                    #[allow(clippy::cast_possible_truncation)]
+                    let skip_count = priming_remaining.min(samples.len() as u32) as usize;
+
+                    for &sample in &samples[skip_count..] {
+                        if sample_tx.send(sample).is_err() {
+                            return Err(NightrideError::Cancelled {
+                                op: "hls::decode_segment_to_samples::send",
+                            });
+                        }
+                    }
+
+                    #[allow(clippy::cast_possible_truncation)]
+                    {
+                        priming_remaining = priming_remaining.saturating_sub(skip_count as u32);
+                    }
+                }
+                Err(SymphoniaError::DecodeError(_)) => {
+                    debug!("hls: skipping malformed packet");
+                }
+                Err(e) => {
+                    return Err(NightrideError::decode(
+                        "hls::decode_segment_to_samples::decode",
+                        e,
+                    ));
+                }
+            },
+            Err(SymphoniaError::IoError(_)) => break,
+            Err(e) => {
+                return Err(NightrideError::decode(
+                    "hls::decode_segment_to_samples::next_packet",
+                    e,
+                ));
+            }
+        }
     }
 
-    let dec = decoder.as_mut().expect("decoder initialized above");
-
-    // Lock sample rate once.
-    let _ = speaker_rate.get_or_init(|| dec.sample_rate);
-
-    // Decode all packets from this segment. Priming samples (if any)
-    // are trimmed by decode_all_packets on the first call only.
-    dec.decode_all_packets(sample_tx)
+    Ok(())
 }
 
 /// HLS decode loop. Runs in its own thread, fetching and decoding segments.
@@ -562,8 +517,6 @@ async fn hls_decode_loop_async(
     let mut backoff = Backoff::new(None); // Use time-derived seed for production
     let mut attempt: u32 = 0;
     let mut fetched_segments: HashSet<String> = HashSet::new();
-    let mut decoder: Option<HlsDecoder> = None;
-    let mut variant_id = PREFERRED_VARIANT.to_string(); // Track variant for reset on change
 
     // Skip the master playlist: nightride.fm's m3u8 layout is consistent
     // (`<base>/<station>.m3u8` master is a sibling of `<base>/aac_hifi.m3u8`
@@ -782,21 +735,10 @@ async fn hls_decode_loop_async(
                 }
             };
 
-            // Decode segment to samples.
-            // Variant change detection: if variant URL changed, drop decoder and reinit
-            if variant_id != PREFERRED_VARIANT {
-                decoder = None;
-                variant_id = PREFERRED_VARIANT.to_string();
-                debug!(
-                    station = station_slug,
-                    "hls: variant changed, resetting decoder"
-                );
-            }
-
+            // Decode segment to samples (per-segment decoder + priming trim).
             match decode_segment_to_samples(
                 &seg_data,
                 init_segment_data.as_deref(),
-                &mut decoder,
                 &sample_tx,
                 &speaker_rate,
             ) {
@@ -921,54 +863,6 @@ mod tests {
 
         assert!(init_name.ends_with("_0.m4s"));
         assert!(!media_name.ends_with("_0.m4s"));
-    }
-
-    /// Test decoder persistence logic via Option state.
-    ///
-    /// Verifies that decoder.is_none() checks and persistence pattern
-    /// work correctly (init once, reuse across segments).
-    #[test]
-    fn decoder_persistence_option_state() {
-        let mut decoder_state: Option<i32> = None;
-
-        // First segment: decoder is None, should initialize.
-        assert!(decoder_state.is_none());
-        decoder_state = Some(1); // Simulate initialization
-
-        // Second segment: decoder is Some, reuse (no re-init).
-        assert!(decoder_state.is_some());
-
-        // Third segment: still Some, persistence verified.
-        assert!(decoder_state.is_some());
-    }
-
-    /// Test variant change detection and decoder reset.
-    ///
-    /// Verifies that variant_id flip triggers decoder drop.
-    #[test]
-    fn variant_change_triggers_decoder_reset() {
-        let mut variant_id = "aac_hifi".to_string();
-        let mut decoder_state: Option<i32> = Some(1); // Simulate active
-
-        // Variant changes
-        let new_variant = "aac_lq".to_string();
-        if variant_id != new_variant {
-            decoder_state = None;
-            variant_id = new_variant;
-        }
-
-        assert!(decoder_state.is_none());
-        assert_eq!(variant_id, "aac_lq");
-    }
-
-    /// Test decoder cleanup safety (RAII via Option::take).
-    ///
-    /// Verifies dropping decoder via take() doesn't panic.
-    #[test]
-    fn decoder_takes_cleanly() {
-        let mut decoder_state: Option<i32> = Some(1);
-        let _dropped = decoder_state.take();
-        assert!(decoder_state.is_none());
     }
 
     /// Test priming sample trim initialization.
