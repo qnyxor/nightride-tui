@@ -32,6 +32,13 @@ const LOG_FILE_PREFIX: &str = "nightride.log";
 /// Retention horizon — files older than this are removed at startup.
 const RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
+/// Build a filter directive that silences third-party crates.
+fn build_filter_directive(user_level: &str) -> String {
+    format!(
+        "{user_level},nightride_tui={user_level},symphonia_format_isomp4=warn,symphonia_bundle_mp3=warn,symphonia_core=warn,hyper=warn,hyper_util=warn,reqwest=warn,rustls=warn,h2=warn"
+    )
+}
+
 /// Initialize tracing with a single file layer.
 ///
 /// `level` accepts any string `tracing_subscriber::EnvFilter` parses
@@ -61,7 +68,8 @@ pub fn init_logging(level: &str, log_dir: Option<PathBuf>) -> Result<WorkerGuard
     let appender = rolling::daily(&dir, LOG_FILE_PREFIX);
     let (writer, guard) = tracing_appender::non_blocking(appender);
 
-    let filter = EnvFilter::try_new(level).map_err(|err| {
+    let filter_directive = build_filter_directive(level);
+    let filter = EnvFilter::try_new(&filter_directive).map_err(|err| {
         NightrideError::config_invalid(
             "logging::init::parse_filter",
             format!("invalid log level {level:?}: {err}"),
@@ -185,5 +193,14 @@ mod tests {
         let dir = base.join(unique);
         fs::create_dir_all(&dir).expect("create tempdir");
         dir
+    }
+
+    #[test]
+    fn filter_silences_third_party_at_info_level() {
+        let directive = super::build_filter_directive("info");
+        assert!(directive.contains("nightride_tui=info"));
+        assert!(directive.contains("symphonia_format_isomp4=warn"));
+        assert!(directive.contains("hyper=warn"));
+        assert!(directive.contains("reqwest=warn"));
     }
 }
