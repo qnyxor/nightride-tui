@@ -63,6 +63,10 @@ pub(super) fn render(frame: &mut ratatui::Frame, area: Rect, app: &App) {
 
     // Render the format prefix label in the left 4 columns:
     // <FMT> in the active station's accent + 1-cell trailing space.
+    // While `is_tuning()` we suffix the prefix with the braille spinner
+    // glyph so the loading indicator lives here, anchored to the
+    // transport label, instead of wedged inside the now-playing
+    // brackets above (which now only carry the `tuning .` text).
     if area.height > 0 && area.width > 0 {
         let label = match app.config.input_format {
             crate::config::TransportFormat::Mp3 => "MP3 ",
@@ -70,22 +74,34 @@ pub(super) fn render(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         };
         let accent_color = app.theme.accent_for(app.displayed_station);
         let label_style = ratatui::style::Style::default().fg(accent_color);
-        let prefix_line = Line::from(Span::styled(label, label_style));
+        let mut prefix_spans: Vec<Span<'static>> = vec![Span::styled(label, label_style)];
+        if app.is_tuning() {
+            prefix_spans.push(Span::styled(app.spinner_glyph().to_string(), label_style));
+        }
+        let prefix_line = Line::from(prefix_spans);
         let prefix_para = Paragraph::new(prefix_line);
+        let prefix_width = if app.is_tuning() {
+            // "MP3 " (4) + spinner glyph (1) = 5.
+            5u16.min(area.width)
+        } else {
+            PREFIX_WIDTH.min(area.width)
+        };
         let prefix_rect = Rect {
             x: area.x,
             y: area.y.saturating_add(area.height.saturating_sub(1)),
-            width: PREFIX_WIDTH.min(area.width),
+            width: prefix_width,
             height: 1,
         };
         frame.render_widget(prefix_para, prefix_rect);
     }
-    // Gate the bars on Streaming state: while connecting / reconnecting
-    // there is no real audio yet, so the silhouette is misleading.
+    // Gate the bars on Streaming + metadata-known: while connecting,
+    // reconnecting, or streaming-without-metadata there is either no
+    // real audio yet or the row is reserved for the tuning indicator.
     if !matches!(
         app.connection,
         crate::audio::ConnectionState::Streaming { .. }
-    ) {
+    ) || app.is_tuning()
+    {
         return;
     }
     let alpha = app.panel_visibility;

@@ -379,6 +379,45 @@ impl App {
         )
     }
 
+    /// `true` while the spectrum row should display the `tuning .` ping-
+    /// pong placeholder instead of bars: either we are mid-connect, or
+    /// we are streaming but the metadata has not yet arrived AND the
+    /// stream is too young to give up on. Capped at
+    /// `TUNING_GRACE_SECS` post-Streaming so an ICY-less MP3 station
+    /// (or an unusually slow SSE first-emit) doesn't trap the UI in
+    /// "tuning" forever — after the grace window the bars render and
+    /// the now-playing line collapses to `[ STATION ]`.
+    pub(crate) fn is_tuning(&self) -> bool {
+        const TUNING_GRACE_SECS: i64 = 5;
+        if matches!(self.connection, ConnectionState::Connecting { .. }) {
+            return true;
+        }
+        if matches!(self.connection, ConnectionState::Streaming { .. }) {
+            let no_meta = match &self.metadata {
+                None => true,
+                Some(md) => md.is_empty(),
+            };
+            if !no_meta {
+                return false;
+            }
+            return match self.stream_started_at {
+                Some(started) => (Local::now() - started).num_seconds().max(0) < TUNING_GRACE_SECS,
+                None => true,
+            };
+        }
+        false
+    }
+
+    /// Current ping-pong dot frame for the `tuning .` placeholder. Five
+    /// frames `. → . . → . . . → . . → .` at ~7 fps so the cadence reads
+    /// as "thinking" without feeling jittery against the 30 fps base.
+    pub(crate) fn tuning_dots(&self) -> &'static str {
+        const TICKS_PER_FRAME: u32 = 4;
+        const FRAMES: [&str; 5] = [".", "..", "...", "..", "."];
+        let idx = ((self.spinner_phase / TICKS_PER_FRAME) as usize) % FRAMES.len();
+        FRAMES[idx]
+    }
+
     /// Apply a visualizer amplitude frame.
     pub fn on_amp_frame(&mut self, amp: Vec<f32>) {
         self.last_amp = Some(amp);
@@ -411,9 +450,7 @@ impl App {
     fn connection_status_text(&self) -> Option<String> {
         match &self.connection {
             ConnectionState::Streaming { .. } => None,
-            ConnectionState::Connecting { .. } => {
-                Some(self.theme.glyphs.tuning_placeholder.to_string())
-            }
+            ConnectionState::Connecting { .. } => Some(format!("tuning {}", self.tuning_dots())),
             ConnectionState::Reconnecting { attempt, .. } => {
                 Some(format!("reconnecting… (attempt {attempt})"))
             }
@@ -444,11 +481,18 @@ impl App {
                 let artist = md.artist.as_deref().unwrap_or("?");
                 format!("[ {station} // {artist} {sep} {title} ]")
             }
-            _ => format!(
-                "[ {station} // {} {} ]",
-                self.spinner_glyph(),
-                self.theme.glyphs.metadata_loading_placeholder,
-            ),
+            // Streaming but metadata not arrived yet: surface the
+            // `tuning .` ping-pong while we are within the grace
+            // window; after that, collapse to `[ STATION ]` so the UI
+            // doesn't pretend to be loading forever on metadata-less
+            // streams.
+            _ => {
+                if self.is_tuning() {
+                    format!("[ {station} // tuning {} ]", self.tuning_dots())
+                } else {
+                    format!("[ {station} ]")
+                }
+            }
         }
     }
 
@@ -469,10 +513,13 @@ impl App {
                 let artist = md.artist.as_deref().unwrap_or("?");
                 format!("{station}//{artist}{sep}{title}")
             }
-            _ => format!(
-                "{station}//{}",
-                self.theme.glyphs.metadata_loading_placeholder,
-            ),
+            _ => {
+                if self.is_tuning() {
+                    format!("{station}//tuning {}", self.tuning_dots())
+                } else {
+                    station.to_string()
+                }
+            }
         }
     }
 
@@ -499,17 +546,16 @@ impl App {
         let accent = self.theme.accent_style(self.displayed_station);
         let neutral = self.theme.text_neutral_style();
         if let Some(status) = self.connection_status_text() {
-            let mut out = vec![
+            // No braille spinner inside the brackets: the spinner now
+            // lives on the spectrum row next to `MP3 ` / `HLS `. The
+            // `tuning .` text already animates via dots ping-pong.
+            return vec![
                 ("[ ".to_string(), accent),
                 (station.to_string(), accent),
                 (" // ".to_string(), accent),
+                (status, neutral),
+                (" ]".to_string(), accent),
             ];
-            if self.is_loading() {
-                out.push((format!("{} ", self.spinner_glyph()), accent));
-            }
-            out.push((status, neutral));
-            out.push((" ]".to_string(), accent));
-            return out;
         }
         match &self.metadata {
             Some(md) if md.title.is_some() || md.artist.is_some() => {
@@ -525,17 +571,25 @@ impl App {
                     (" ]".to_string(), accent),
                 ]
             }
-            _ => vec![
-                ("[ ".to_string(), accent),
-                (station.to_string(), accent),
-                (" // ".to_string(), accent),
-                (format!("{} ", self.spinner_glyph()), accent),
-                (
-                    self.theme.glyphs.metadata_loading_placeholder.to_string(),
-                    neutral,
-                ),
-                (" ]".to_string(), accent),
-            ],
+            // Streaming but metadata not arrived yet: tuning while in
+            // grace window, otherwise collapse to `[ STATION ]`.
+            _ => {
+                if self.is_tuning() {
+                    vec![
+                        ("[ ".to_string(), accent),
+                        (station.to_string(), accent),
+                        (" // ".to_string(), accent),
+                        (format!("tuning {}", self.tuning_dots()), neutral),
+                        (" ]".to_string(), accent),
+                    ]
+                } else {
+                    vec![
+                        ("[ ".to_string(), accent),
+                        (station.to_string(), accent),
+                        (" ]".to_string(), accent),
+                    ]
+                }
+            }
         }
     }
 }
