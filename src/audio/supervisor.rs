@@ -34,7 +34,7 @@ use rodio::Source;
 use rodio::source::UniformSourceIterator;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::config::TransportFormat;
 use crate::error::NightrideError;
@@ -372,7 +372,7 @@ async fn attach_stream(
 
     std::thread::spawn(move || {
         if use_hls {
-            debug!(station = station_slug, "attach_stream: using HLS path");
+            info!(station = station_slug, "attach_stream: using HLS path");
             let hls_url = station.stream_hls.to_string();
             hls_decode_loop(
                 hls_url,
@@ -384,7 +384,7 @@ async fn attach_stream(
                 ready_flag,
             );
         } else {
-            debug!(station = station_slug, "attach_stream: using MP3 path");
+            info!(station = station_slug, "attach_stream: using MP3 path");
             let mp3_url = station.stream_mp3.to_string();
             decode_loop(
                 mp3_url,
@@ -409,7 +409,13 @@ async fn attach_stream(
         let evt_tx_sse = evt_tx.clone();
         let sse_token = stream_token.child_token();
         tokio::spawn(async move {
-            crate::metadata::sse::spawn_sse_supervisor(evt_tx_sse, station_slug, sse_token).await;
+            crate::metadata::sse::spawn_sse_supervisor(
+                evt_tx_sse,
+                station_slug,
+                crate::audio::hls::HLS_AUDIO_LAG,
+                sse_token,
+            )
+            .await;
         });
     }
 

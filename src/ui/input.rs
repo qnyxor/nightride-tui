@@ -58,21 +58,27 @@ impl App {
         cmd_tx: &mpsc::Sender<AudioCommand>,
     ) -> Result<()> {
         match action {
-            Action::Quit => self.should_quit = true,
+            Action::Quit => {
+                info!("action: Quit");
+                self.should_quit = true;
+            }
             Action::VolumeUp => {
                 self.volume = self.volume.saturating_add(VOLUME_STEP).min(100);
+                info!(volume = self.volume, "action: VolumeUp");
                 self.send(cmd_tx, AudioCommand::SetVolume(self.volume))
                     .await?;
                 self.request_save();
             }
             Action::VolumeDown => {
                 self.volume = self.volume.saturating_sub(VOLUME_STEP);
+                info!(volume = self.volume, "action: VolumeDown");
                 self.send(cmd_tx, AudioCommand::SetVolume(self.volume))
                     .await?;
                 self.request_save();
             }
             Action::MuteToggle => {
                 let new_volume = self.mute_toggle();
+                info!(volume = new_volume, "action: MuteToggle");
                 self.send(cmd_tx, AudioCommand::SetVolume(new_volume))
                     .await?;
                 self.request_save();
@@ -100,6 +106,12 @@ impl App {
             }
             Action::NextStation => {
                 let next = station::next(self.current_station);
+                info!(
+                    from = self.current_station.slug,
+                    to = next.slug,
+                    transport = ?self.config.input_format,
+                    "action: NextStation"
+                );
                 self.change_station(next);
                 self.send(
                     cmd_tx,
@@ -110,6 +122,12 @@ impl App {
             }
             Action::PrevStation => {
                 let prev = station::prev(self.current_station);
+                info!(
+                    from = self.current_station.slug,
+                    to = prev.slug,
+                    transport = ?self.config.input_format,
+                    "action: PrevStation"
+                );
                 self.change_station(prev);
                 self.send(
                     cmd_tx,

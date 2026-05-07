@@ -126,13 +126,35 @@ pub async fn run(args: CliArgs, root: CancellationToken) -> Result<()> {
 
     // 4. Init logging. WorkerGuard MUST outlive every spawned task —
     //    we hold it in the local stack until run returns.
-    let _log_guard = logging::init_logging(&cfg.log_level, cfg.log_dir.clone())?;
+    //    Suffix the configured `log_level` with per-target overrides
+    //    pinning every noisy third-party crate to `warn`. Symphonia in
+    //    particular emits `info!` on every fMP4 atom it parses, which
+    //    drowns our own `info!` lines — at one segment every 5 s that
+    //    is several lines per second of unwanted output. Likewise
+    //    reqwest / hyper / h2 narrate every connection lifecycle event
+    //    at info. The user's `log_level` (default `info`) still drives
+    //    our own crate; the suffix only attenuates the dependencies.
+    let log_level = format!(
+        "{},symphonia=warn,symphonia_format_isomp4=warn,symphonia_codec_aac=warn,\
+         symphonia_bundle_mp3=warn,symphonia_metadata=warn,reqwest=warn,reqwest_eventsource=warn,\
+         hyper=warn,hyper_util=warn,h2=warn,rustls=warn",
+        cfg.log_level,
+    );
+    let _log_guard = logging::init_logging(&log_level, cfg.log_dir.clone())?;
     info!(
         version = env!("CARGO_PKG_VERSION"),
         station = %cfg.default_station,
         volume = cfg.default_volume,
         "nightride starting"
     );
+
+    // Background HLS pre-warm: opens the TLS connection to the HLS
+    // host and caches the init segment for the default station before
+    // the operator interacts. Saves ~350 ms on the first attach. Fire-
+    // and-forget, failure is non-fatal.
+    if let Some(default_station) = crate::station::by_slug(&cfg.default_station) {
+        audio::hls::prewarm(default_station);
+    }
 
     // 5. Channel topology per design § Channel topology.
     let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>(32);

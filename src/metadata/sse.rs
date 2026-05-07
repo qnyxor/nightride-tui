@@ -168,11 +168,18 @@ fn parse_sse_event(raw: &str, station_slug: &str) -> Option<Metadata> {
 /// # Arguments
 ///
 /// - `evt_tx`: async channel to emit `AudioEvent::Metadata` updates.
-/// - `token`: cancellation token; task exits cleanly when fired.
+/// - `station_slug`: filter SSE entries to this station.
+/// - `audio_lag`: delay applied to every metadata emit so the UI title +
+///   `stream_started_at` reset land in sync with the audible HLS track
+///   change. Pass `Duration::ZERO` for transports without a meaningful
+///   lag (MP3, in-line ICY).
+/// - `token`: cancellation token; task exits cleanly when fired and
+///   propagates to all in-flight delayed emits.
 ///
 /// # Examples
 ///
 /// ```no_run
+/// use std::time::Duration;
 /// use tokio_util::sync::CancellationToken;
 /// use tokio::sync::mpsc;
 /// use nightride_tui::audio::AudioEvent;
@@ -185,7 +192,12 @@ fn parse_sse_event(raw: &str, station_slug: &str) -> Option<Metadata> {
 ///     let child = token.child_token();
 ///
 ///     // Spawn SSE supervisor.
-///     let future = spawn_sse_supervisor(evt_tx, "darksynth", child);
+///     let future = spawn_sse_supervisor(
+///         evt_tx,
+///         "darksynth",
+///         Duration::from_secs(60),
+///         child,
+///     );
 ///     tokio::spawn(future);
 ///
 ///     // Simulate cancel after 5 seconds.
@@ -196,6 +208,7 @@ fn parse_sse_event(raw: &str, station_slug: &str) -> Option<Metadata> {
 pub async fn spawn_sse_supervisor(
     evt_tx: mpsc::Sender<AudioEvent>,
     station_slug: &'static str,
+    audio_lag: Duration,
     token: CancellationToken,
 ) {
     let url = "https://nightride.fm/meta";
@@ -209,7 +222,7 @@ pub async fn spawn_sse_supervisor(
             }
             () = tokio::time::sleep(Duration::ZERO) => {
                 // Attempt connection.
-                match connect_and_stream(url, station_slug, &evt_tx, &token).await {
+                match connect_and_stream(url, station_slug, &evt_tx, audio_lag, &token).await {
                     Ok(()) => {
                         // Stream ended cleanly (e.g., server close). Reset backoff.
                         backoff.reset(Duration::from_millis(500));
@@ -242,6 +255,7 @@ async fn connect_and_stream(
     url: &str,
     station_slug: &str,
     evt_tx: &mpsc::Sender<AudioEvent>,
+    audio_lag: Duration,
     token: &CancellationToken,
 ) -> Result<(), String> {
     const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(90);
@@ -274,6 +288,17 @@ async fn connect_and_stream(
         EventSource::new(request).map_err(|e| format!("event source creation failed: {e}"))?;
 
     let mut last_event_time = std::time::Instant::now();
+    // First event of this connection is the server-side snapshot
+    // (now-playing across all stations, sent in burst on connect).
+    // Emit it immediately without `audio_lag` — otherwise the UI would
+    // sit on `loading metadata…` for 60 s on every station switch and
+    // every SSE reconnect. The cost is that the title shown during the
+    // first ~60 s of a session is "ahead" of the audible track (the
+    // snapshot reflects the server's live edge, which our HLS buffer
+    // is 60 s behind). That mismatch self-resolves the moment the
+    // first delayed change emit lands. Reset on every reconnect so the
+    // post-reconnect snapshot also bypasses the delay.
+    let mut first_event_emitted = false;
 
     loop {
         tokio::select! {
@@ -318,9 +343,42 @@ async fn connect_and_stream(
                             debug!(
                                 artist = ?metadata.artist,
                                 title = ?metadata.title,
-                                "sse_supervisor: parsed metadata"
+                                lag_ms = audio_lag.as_millis(),
+                                "sse_supervisor: parsed metadata, scheduling delayed emit"
                             );
-                            let _ = evt_tx.try_send(AudioEvent::Metadata(metadata));
+                            // Defer the emit by `audio_lag` so the UI title and
+                            // `stream_started_at` reset land in lockstep with
+                            // the audible track change. SSE arrives at the
+                            // server-side live edge while HLS audio is buffered
+                            // ~60s back; without the delay the timer would
+                            // already read 0:01:00 by the time the operator
+                            // hears the new song. The delayed task takes a
+                            // child of the supervisor's cancellation token so
+                            // a station switch (parent cancel) drops every
+                            // in-flight emit instead of leaking stale metadata
+                            // into the UI of the new station.
+                            if audio_lag.is_zero() || !first_event_emitted {
+                                let _ = evt_tx.try_send(AudioEvent::Metadata(metadata));
+                                first_event_emitted = true;
+                            } else {
+                                let evt_tx_delayed = evt_tx.clone();
+                                let token_child = token.child_token();
+                                tokio::spawn(async move {
+                                    tokio::select! {
+                                        () = tokio::time::sleep(audio_lag) => {
+                                            let _ = evt_tx_delayed
+                                                .send(AudioEvent::Metadata(metadata))
+                                                .await;
+                                        }
+                                        () = token_child.cancelled() => {
+                                            debug!(
+                                                "sse_supervisor: delayed emit \
+                                                 cancelled (station change?)"
+                                            );
+                                        }
+                                    }
+                                });
+                            }
                         }
                     }
                 }
@@ -423,8 +481,9 @@ mod tests {
         let token = CancellationToken::new();
         let child = token.child_token();
 
-        let supervisor_handle =
-            tokio::spawn(async move { spawn_sse_supervisor(evt_tx, "darksynth", child).await });
+        let supervisor_handle = tokio::spawn(async move {
+            spawn_sse_supervisor(evt_tx, "darksynth", Duration::ZERO, child).await;
+        });
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         token.cancel();

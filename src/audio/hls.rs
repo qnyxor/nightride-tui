@@ -61,10 +61,11 @@
 //! The reconnect loop re-fetches the media playlist and detects new segment
 //! URLs after backoff sleeps. No new reconnect state machine; AD-01 is reused.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
@@ -80,7 +81,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::error::NightrideError;
 
@@ -98,6 +99,15 @@ const PREFERRED_VARIANT: &str = "aac_hifi";
 /// unavailable or returns None.
 const PRIMING_SAMPLES_AAC: u32 = 2112;
 
+/// Process-wide cache of init segments keyed by station slug. The init
+/// (`aac_hifi_0.m4s`) is static per station — same `moov` atom for the
+/// life of the stream — so we only pay the ~200 ms HTTPS fetch the
+/// first time the operator visits a station this session. Subsequent
+/// attaches to the same station skip the init fetch entirely. Bounded
+/// by the station registry (10 stations × ~1 KB init = negligible).
+static INIT_SEGMENT_CACHE: LazyLock<Mutex<HashMap<&'static str, Vec<u8>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// Process-wide reqwest client for HLS playlist + segment fetches.
 /// Reusing one Client across station switches keeps the connection pool
 /// warm — TLS handshakes to `stream.nightride.fm:8443` only pay their
@@ -114,6 +124,72 @@ static HLS_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 /// Ring-set deduplication window: max segment URLs to track in memory.
 /// At ~2s segments, 180 segments covers ~6 minutes of playback.
 const SEGMENT_DEDUP_WINDOW: usize = 180;
+
+/// Background pre-warm: open the TLS connection to the HLS host and
+/// populate the init-segment cache for the given station before the
+/// operator presses any key. Fire-and-forget; failures are logged at
+/// debug and don't block startup. Saves the ~150 ms cold TLS handshake
+/// plus the ~200 ms init fetch on the first station attach of the
+/// session (assuming the user takes more than ~350 ms to act).
+///
+/// Call from `lib::run` once per session with the default station.
+pub fn prewarm(default_station: &'static crate::station::Station) {
+    let master_url = default_station.stream_hls.to_string();
+    let station_slug = default_station.slug;
+    tokio::spawn(async move {
+        // Derive the init URL the same way `hls_decode_loop` does.
+        let init_url_base = master_url
+            .split('/')
+            .take(master_url.split('/').count() - 1)
+            .collect::<Vec<_>>()
+            .join("/");
+        let full_init_url = format!("{init_url_base}/aac_hifi_0.m4s");
+        match fetch_segment(&HLS_CLIENT, &full_init_url, None).await {
+            Ok(data) => {
+                debug!(
+                    station = station_slug,
+                    bytes = data.len(),
+                    "hls: prewarm — TLS handshake done, init cached"
+                );
+                if let Ok(mut cache) = INIT_SEGMENT_CACHE.lock() {
+                    cache.entry(station_slug).or_insert_with(|| data.clone());
+                }
+            }
+            Err(e) => {
+                debug!(
+                    ?e,
+                    station = station_slug,
+                    "hls: prewarm fetch failed (non-fatal — first attach will retry)"
+                );
+            }
+        }
+    });
+}
+
+/// HLS Live audio lag relative to the SSE metadata stream.
+///
+/// Nightride.fm's `/meta` endpoint emits track changes the moment the
+/// server-side player rotates the now-playing track at the live edge.
+/// Our HLS audio sits behind that edge by `PREROLL_LIVE_EDGE_OFFSET`
+/// segments × ~5 s = the value below. If we propagated SSE events the
+/// moment they arrive, the title and `stream_started_at` reset would
+/// land before the audible track change.
+///
+/// The SSE supervisor delays every `AudioEvent::Metadata` emit by this
+/// duration so title + timer change in lockstep with the audible track
+/// boundary. Keep this in sync with `PREROLL_LIVE_EDGE_OFFSET` ×
+/// segment duration (Nightride emits ~5.033 s segments).
+pub const HLS_AUDIO_LAG: Duration = Duration::from_secs(15);
+
+/// Number of segments back from the live edge to start playback at on
+/// every fresh attach (preroll). Convention HLS players use 3 segments
+/// back as a balance between low lag (closer to edge → more responsive
+/// to "now") and resilience against network jitter (more buffer ahead
+/// → fewer rebuffers under transient loss). Nightride publishes 10
+/// segments per playlist; starting at index `len-3` discards ~7
+/// segments of stale backlog (~35 s) the operator would otherwise have
+/// to listen through before catching up to live.
+pub const PREROLL_LIVE_EDGE_OFFSET: usize = 3;
 
 /// Outcome of a single HLS fetch-and-decode cycle.
 ///
@@ -550,28 +626,58 @@ async fn hls_decode_loop_async(
         .join("/");
     let full_init_url = format!("{init_url}/aac_hifi_0.m4s");
 
-    // Parallel boot: init segment and first media playlist fetch
-    // concurrently — they share no dependency, but were sequential before.
-    // Saves ~1 HTTPS round-trip (~150–300 ms) on every station switch.
-    let (init_result, first_playlist_result) = tokio::join!(
-        fetch_segment(&client, &full_init_url, None),
-        fetch_media_playlist(&client, &variant_url),
-    );
+    // Init cache hit: skip the init fetch entirely and parallelise
+    // nothing (the playlist fetch is the only network op left). On
+    // miss: parallel fetch init + playlist as before.
+    let cached_init: Option<Vec<u8>> = INIT_SEGMENT_CACHE
+        .lock()
+        .ok()
+        .and_then(|m| m.get(station_slug).cloned());
 
-    let init_segment_data: Option<Vec<u8>> = match init_result {
+    let (init_result, first_playlist_result) = if let Some(cached) = cached_init {
+        debug!(
+            station = station_slug,
+            bytes = cached.len(),
+            "hls: init segment cache hit, skipping fetch"
+        );
+        let pl = fetch_media_playlist(&client, &variant_url).await;
+        (Ok::<Vec<u8>, NightrideError>(cached), pl)
+    } else {
+        // Parallel boot: init segment and first media playlist fetch
+        // concurrently — they share no dependency, but were sequential
+        // before. Saves ~1 HTTPS round-trip (~150-300 ms) on every
+        // station switch.
+        tokio::join!(
+            fetch_segment(&client, &full_init_url, None),
+            fetch_media_playlist(&client, &variant_url),
+        )
+    };
+
+    let mut init_segment_data: Option<Vec<u8>> = match init_result {
         Ok(data) => {
             debug!(
                 station = station_slug,
                 bytes = data.len(),
-                "hls: init segment fetched"
+                "hls: init segment ready"
             );
+            // Populate cache on first successful fetch for this station.
+            if let Ok(mut cache) = INIT_SEGMENT_CACHE.lock() {
+                cache.entry(station_slug).or_insert_with(|| data.clone());
+            }
             Some(data)
         }
         Err(e) => {
-            debug!(
+            // Init failure is NOT non-fatal: every media segment is
+            // fragmented MP4 and needs the init's `moov` atom to be
+            // identified by symphonia. Without it, every probe fails
+            // with `UnexpectedEof` and the segment loop spins. Log
+            // warn and let the loop retry the fetch on each iteration
+            // (escalation to a hard Error happens via the playlist
+            // backoff path if the upstream is genuinely down).
+            warn!(
                 ?e,
                 station = station_slug,
-                "hls: init segment fetch failed (non-fatal)"
+                "hls: init segment fetch failed at preroll, will retry"
             );
             None
         }
@@ -658,7 +764,7 @@ async fn hls_decode_loop_async(
         };
 
         // Extract segments and filter out already-fetched ones.
-        let segments = extract_segments(&media_playlist);
+        let mut segments = extract_segments(&media_playlist);
         if segments.is_empty() {
             debug!(
                 station = station_slug,
@@ -666,6 +772,29 @@ async fn hls_decode_loop_async(
             );
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
             continue;
+        }
+        // Preroll only: trim to the last PREROLL_LIVE_EDGE_OFFSET
+        // segments. Without this we'd start at the OLDEST segment in
+        // the playlist and the operator would listen to ~35 s of stale
+        // audio before catching up to what's actually playing live on
+        // the server. Subsequent loop iterations skip this trim — by
+        // then `fetched_segments` is acting as the live-edge follower
+        // and the playlist refresh just appends the newest segments.
+        if !preroll_done && segments.len() > PREROLL_LIVE_EDGE_OFFSET {
+            let drop_count = segments.len() - PREROLL_LIVE_EDGE_OFFSET;
+            debug!(
+                station = station_slug,
+                drop_count,
+                kept = PREROLL_LIVE_EDGE_OFFSET,
+                "hls: preroll skip-to-live-edge"
+            );
+            // Mark the dropped segments as already-fetched so that if
+            // a later playlist refresh still lists them they are not
+            // re-played. Without this the dedup ring would let them
+            // back in once the trim is no longer applied.
+            for old_seg in segments.drain(..drop_count) {
+                fetched_segments.insert(old_seg);
+            }
         }
 
         // Deduplicate: only fetch segments we haven't seen yet.
@@ -735,6 +864,39 @@ async fn hls_decode_loop_async(
                 }
             };
 
+            // Lazy init refetch: if the preroll fetch failed (or was
+            // cancelled by a rapid station switch), every probe below
+            // would hit UnexpectedEof. Refetch the init segment now,
+            // before paying the decode cost on a buffer we know cannot
+            // be parsed. One retry per loop iteration; if it keeps
+            // failing the playlist backoff path will eventually
+            // surface a HardNetwork escalation upstream.
+            if init_segment_data.is_none() {
+                match fetch_segment(&client, &full_init_url, None).await {
+                    Ok(data) => {
+                        debug!(
+                            station = station_slug,
+                            bytes = data.len(),
+                            "hls: init segment refetched after preroll miss"
+                        );
+                        if let Ok(mut cache) = INIT_SEGMENT_CACHE.lock() {
+                            cache.entry(station_slug).or_insert_with(|| data.clone());
+                        }
+                        init_segment_data = Some(data);
+                    }
+                    Err(e) => {
+                        warn!(
+                            ?e,
+                            station = station_slug,
+                            "hls: init segment refetch failed, skipping segment"
+                        );
+                        fetched_segments.insert(seg_uri.clone());
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                        continue;
+                    }
+                }
+            }
+
             // Decode segment to samples (per-segment decoder + priming trim).
             match decode_segment_to_samples(
                 &seg_data,
@@ -778,14 +940,39 @@ async fn hls_decode_loop_async(
                     return Err(HlsDecodeOutcome::Cancelled);
                 }
                 Err(e) => {
-                    let _ = try_emit(
-                        &evt_tx,
-                        AudioEvent::ConnectionState(ConnectionState::Error {
-                            station: station_slug,
-                            detail: e.to_string(),
-                        }),
+                    // Probe / decode failures on a single segment are
+                    // almost always transient: a partial fetch during
+                    // teardown, a corrupt CDN segment, a transient
+                    // truncation. Emitting `ConnectionState::Error`
+                    // poisons the now-playing line for a state that
+                    // resolves on the very next segment. Log and skip
+                    // — the loop continues with the next segment from
+                    // the playlist; if failures persist across many
+                    // segments the playlist refresh + backoff cycle
+                    // takes over via `ErrorClass::HardNetwork`.
+                    warn!(
+                        station = station_slug,
+                        segment = seg_uri,
+                        error = ?e,
+                        "hls: segment decode failed, skipping (transient or teardown)"
                     );
-                    return Err(HlsDecodeOutcome::HardCodec(e));
+                    if stop_flag.load(Ordering::Acquire) {
+                        return Err(HlsDecodeOutcome::Cancelled);
+                    }
+                    // Mark this segment as fetched so the next playlist
+                    // refresh doesn't see it as new and retry it in a
+                    // tight busy loop. Without this, a corrupt segment
+                    // sitting in the live window keeps surfacing every
+                    // playlist refresh until it rotates out (~50 s),
+                    // burning CPU and spamming the log at thousands of
+                    // attempts per minute.
+                    fetched_segments.insert(seg_uri.clone());
+                    // Brief breather so a stretch of consecutive bad
+                    // segments does not pin a CPU core. 100 ms is small
+                    // enough that good segments arriving in the same
+                    // playlist still get processed promptly.
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    continue;
                 }
             }
 
