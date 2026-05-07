@@ -80,7 +80,7 @@ nightride-tui -h <subcommand>    # contextual help
 | `t` | toggle transport (MP3 ⇄ HLS) |
 | `Ctrl+C` | disconnect |
 
-**Transport default**: HLS (CMAF/AAC, ABR-ready, mirrors the nightride.fm web player). Press `t` to switch to MP3 in three cases: port 8443 is blocked by your network, you're on a CPU-constrained box where AAC decode is too costly, or you need a clean fallback while debugging an HLS-side issue. Your choice persists in the state file (`audio.input_format`).
+**Transport default**: HLS (CMAF/AAC). Press `t` for MP3. Choice persists in the state file (`audio.input_format`).
 
 ### / OPTIONAL FONTS
 
