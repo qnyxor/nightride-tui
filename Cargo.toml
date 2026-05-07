@@ -6,7 +6,7 @@
 
 [package]
 name = "nightride-tui"
-version = "1.0.4"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.88"
 authors = ["QNYXOR <qnyxor@pm.me>"]
