@@ -12,6 +12,50 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-05-07
+
+### Added
+
+- **HLS Live transport.** AAC fMP4 streaming via `symphonia` +
+  `m3u8-rs`, hardcoded to the `aac_hifi` variant on Nightride's `:8443`
+  edge. Selectable per session; persisted to the platform state file
+  (`audio.input_format`).
+- **`t` keybind — runtime transport toggle.** Switch MP3 ↔ HLS without
+  restarting; the new selection writes through to the state file and
+  survives the next launch.
+- **SSE metadata channel.** `nightride.fm/meta` server-sent events
+  drive now-playing. `HLS_AUDIO_LAG = 15s` deferred-emit smooths the
+  gap between server-side track changes and audible audio; the first
+  emit per SSE connection bypasses the delay so the line populates
+  immediately. Cancellation propagates through a child token, so
+  station switches drop in-flight emits cleanly.
+- **Skip-to-live-edge preroll.** `PREROLL_LIVE_EDGE_OFFSET = 3` —
+  attach starts at `segments[len - 3]`, discarding ~35 s of stale
+  backlog on every fresh connection. Closes the "30-second-ago audio"
+  surprise after a station switch.
+- **Per-station init-segment cache + background TLS prewarm.** Cache
+  populated on first attach; subsequent attaches of the same station
+  skip the init fetch. TLS handshake to `:8443` warmed at startup.
+  Combined: ~350 ms saved on first attach of the session.
+- **Tuning indicator.** Braille spinner anchored to the spectrum row
+  while the stream is locking on; animated `tuning .` / `tuning ..` /
+  `tuning ...` ping-pong on the now-playing line. Both surfaces share
+  the new `is_tuning()` predicate; `TUNING_GRACE_SECS = 5` caps the
+  state so ICY-less or laggy streams cannot trap the UI in tuning mode.
+
+### Changed
+
+- **Logging hygiene.** Every keypress action now surfaces at `info`
+  (audit trail of operator intent). Third-party crate noise from
+  `symphonia`, `reqwest`, `hyper`, `h2`, `rustls`, and
+  `reqwest-eventsource` is filtered down to `warn` so the journal
+  reflects nightride-tui's own behaviour rather than the network stack
+  underneath.
+- **Release matrix expanded.** Adds Linux aarch64 (gnu + musl) lanes
+  alongside the existing macOS aarch64 / x86_64 + Linux x86_64.
+  End-to-end self-update flow validated on the wire (`nightride-tui
+  update` 1.0.4 → 1.1.0).
+
 ## [1.0.4] — 2026-05-05
 
 ### Changed
@@ -164,7 +208,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - Bundled Iosevka Term Nerd Font and Nightride FM Monospace install commands.
 - Curl-pipe installer for macOS arm64 / x86_64 and Linux x86_64 / aarch64.
 
-[Unreleased]: https://github.com/qnyxor/nightride-tui/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/qnyxor/nightride-tui/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/qnyxor/nightride-tui/compare/v1.0.4...v1.1.0
+[1.0.4]: https://github.com/qnyxor/nightride-tui/compare/v1.0.3...v1.0.4
+[1.0.3]: https://github.com/qnyxor/nightride-tui/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/qnyxor/nightride-tui/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/qnyxor/nightride-tui/releases/tag/v1.0.1
 [1.0.0]: https://github.com/qnyxor/nightride-tui/releases/tag/v1.0.0
