@@ -122,7 +122,10 @@ jobs:
           cp README.md                 "dist/${TARGET}/README.md"
 
           if [[ "$TARGET" == *"windows"* ]]; then
-            cd "dist/${TARGET}" && zip -r "../../${ARCHIVE}" . && cd ../../..
+            # `zip` is not on the windows-2022 runner's Git Bash PATH;
+            # 7-Zip ships pre-installed and produces the same .zip
+            # layout via `7z a -tzip`. Subshell scopes the `cd`.
+            ( cd "dist/${TARGET}" && 7z a -tzip "../../${ARCHIVE}" . > /dev/null )
           else
             tar -czf "$ARCHIVE" -C "dist/${TARGET}" \
                 nightride-tui LICENSE THIRD_PARTY_LICENSES.md README.md
