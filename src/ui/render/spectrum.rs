@@ -46,8 +46,10 @@ const SPECTRUM_BOTTOM_ROW_FACTOR: f32 = 0.3;
 /// `INTENSITY_CAP × (BOTTOM_ROW_FACTOR + GRADIENT_RANGE)` alpha.
 const SPECTRUM_GRADIENT_RANGE: f32 = 0.7;
 
-/// Width of the format-prefix label in cells: "MP3 " or "HLS " = 4 cols.
-pub(super) const PREFIX_WIDTH: u16 = 4;
+/// Width of the format-prefix label in cells: "MP3  " or "HLS  " = 5 cols
+/// (3-char tag + 2-cell trailing gutter so the spectrum body never
+/// crowds the prefix glyph).
+pub(super) const PREFIX_WIDTH: u16 = 5;
 
 /// Render the Braille spectrum with a format-prefix label.
 #[allow(
@@ -69,8 +71,8 @@ pub(super) fn render(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     // brackets above (which now only carry the `tuning .` text).
     if area.height > 0 && area.width > 0 {
         let label = match app.config.input_format {
-            crate::config::TransportFormat::Mp3 => "MP3 ",
-            crate::config::TransportFormat::Hls => "HLS ",
+            crate::config::TransportFormat::Mp3 => "MP3  ",
+            crate::config::TransportFormat::Hls => "HLS  ",
         };
         let accent_color = app.theme.accent_for(app.displayed_station);
         let label_style = ratatui::style::Style::default().fg(accent_color);
@@ -81,8 +83,8 @@ pub(super) fn render(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         let prefix_line = Line::from(prefix_spans);
         let prefix_para = Paragraph::new(prefix_line);
         let prefix_width = if app.is_tuning() {
-            // "MP3 " (4) + spinner glyph (1) = 5.
-            5u16.min(area.width)
+            // "MP3  " (5) + spinner glyph (1) = 6.
+            6u16.min(area.width)
         } else {
             PREFIX_WIDTH.min(area.width)
         };
@@ -295,20 +297,20 @@ mod tests {
     #[test]
     fn spectrum_prefix_label_for_mp3() {
         let label = match TransportFormat::Mp3 {
-            TransportFormat::Mp3 => "MP3 ",
-            TransportFormat::Hls => "HLS ",
+            TransportFormat::Mp3 => "MP3  ",
+            TransportFormat::Hls => "HLS  ",
         };
-        assert_eq!(label, "MP3 ");
+        assert_eq!(label, "MP3  ");
         assert_eq!(label.len(), super::PREFIX_WIDTH as usize);
     }
 
     #[test]
     fn spectrum_prefix_label_for_hls() {
         let label = match TransportFormat::Hls {
-            TransportFormat::Mp3 => "MP3 ",
-            TransportFormat::Hls => "HLS ",
+            TransportFormat::Mp3 => "MP3  ",
+            TransportFormat::Hls => "HLS  ",
         };
-        assert_eq!(label, "HLS ");
+        assert_eq!(label, "HLS  ");
         assert_eq!(label.len(), super::PREFIX_WIDTH as usize);
     }
 }

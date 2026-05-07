@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, ubuntu-24.04]
+        os: [macos-14, ubuntu-24.04, windows-2022]
 
     steps:
       - name: Checkout
@@ -62,8 +62,29 @@ jobs:
         run: cargo test --all --features test-export
 
       - name: Install cargo-audit
+        if: runner.os != 'Windows'
         run: cargo install cargo-audit --locked
 
       - name: audit
+        if: runner.os != 'Windows'
         run: cargo audit --deny warnings
         continue-on-error: true
+
+      # Windows-only: produce a release `.exe` and upload it as a
+      # GitHub Actions artifact so the operator can validate the
+      # binary on real Windows hardware without installing the MSVC
+      # toolchain locally. Artifacts are only downloadable by users
+      # with `read` access to the repo and expire after 14 days. They
+      # do NOT produce a public release, tag, or version bump.
+      - name: Build release binary (artifact)
+        if: runner.os == 'Windows'
+        run: cargo build --release
+
+      - name: Upload Windows binary artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightride-tui-windows-x86_64-msvc
+          path: target/release/nightride-tui.exe
+          if-no-files-found: error
+          retention-days: 14

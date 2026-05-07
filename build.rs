@@ -57,7 +57,32 @@ fn main() {
     {
         println!("cargo:warning=vergen emit failed ({err}); option_env! will fall back");
     }
+
+    embed_windows_resources();
 }
+
+/// Embed the Windows PE resource block (icon + VERSIONINFO).
+///
+/// `embed-resource` is gated to `target_os = "windows"` build-deps in
+/// Cargo.toml, so the body — and the `use embed_resource;` it implies —
+/// only compiles when the build script itself is built for Windows.
+/// CI builds the Windows lane on a `windows-2022` runner (host == target);
+/// no cross-compile path crosses through here.
+///
+/// Bump protocol: when `Cargo.toml` `version` changes, also update
+/// `FILEVERSION`, `PRODUCTVERSION`, `FileVersion`, and `ProductVersion`
+/// in `assets/windows/Resource.rc` in the same commit.
+#[cfg(target_os = "windows")]
+fn embed_windows_resources() {
+    println!("cargo:rerun-if-changed=assets/windows/Resource.rc");
+    println!("cargo:rerun-if-changed=assets/windows/nightride-tui.ico");
+    embed_resource::compile("assets/windows/Resource.rc", embed_resource::NONE)
+        .manifest_required()
+        .expect("compile assets/windows/Resource.rc");
+}
+
+#[cfg(not(target_os = "windows"))]
+fn embed_windows_resources() {}
 
 enum AssetKind {
     Font,

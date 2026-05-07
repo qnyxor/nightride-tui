@@ -90,9 +90,13 @@ pub fn init_logging(level: &str, log_dir: Option<PathBuf>) -> Result<WorkerGuard
 
 /// Resolve the canonical state directory for log output.
 ///
-/// `directories` does not expose `state_dir`, so we use `data_dir`
-/// (Linux: `~/.local/share/nightride/log`, macOS:
-/// `~/Library/Application Support/nexus.qnyxor.nightride/log`).
+/// `directories` does not expose `state_dir`, so we use `data_dir`:
+///
+/// - Linux: `~/.local/share/nightride/log`
+/// - macOS: `~/Library/Application Support/nexus.qnyxor.nightride/log`
+/// - Windows: `%APPDATA%\qnyxor\nightride\data\log`
+///   (qualifier ignored; `<organization>\<application>\data`).
+///
 /// Fallback is `/tmp/nightride/log` when `ProjectDirs` returns None
 /// (stripped sandbox without `$HOME`).
 fn default_log_dir() -> PathBuf {

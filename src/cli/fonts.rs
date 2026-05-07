@@ -158,11 +158,42 @@ pub(super) const INSTALLABLE_FONTS: &[InstallableFont] = &[IOSEVKA, NIGHTRIDE_FM
 
 pub(super) const INSTALL_TUI_FONT_INTRO: &str =
     "Install Iosevka Term Nerd Font Regular into your user font directory.";
-pub(super) const INSTALL_TUI_FONT_NOTE: &str = "This is the recommended runtime font for \x1b[1mnightride-tui\x1b[0m because it covers Braille, Box Drawing, and Block Elements used by the visualizer and chrome.\n\nTerminals do not auto-reload fonts. Re-launch your terminal and (optionally) select 'IosevkaTermNerdFont-Regular' in its preferences. Any mono with briale + box-drawing also works - see README Embedded assets for the supported glyph ranges.\nAuthored by Belleve Invis (Iosevka) and Ryan L McIntyre (Nerd Fonts) under SIL OFL 1.1.\n---\n<https://github.com/be5invis/iosevka> | <https://nerdfonts.com>";
+
+/// Post-install copy for macOS / Linux. The OS-side font cache picks
+/// the file up automatically; the user only has to relaunch their
+/// terminal and (optionally) select the new face.
+pub(super) const INSTALL_TUI_FONT_NOTE: &str = "Relaunch your terminal. Iosevka Term Nerd Font is now installed.\n\
+     Select it in terminal preferences to render the spectrum and UI chrome.\n\
+     Other monospace fonts with Braille and Box Drawing support also work.\n\
+     See the license file for details.";
+
+/// Post-install copy for Windows. Drop-and-go does not register the
+/// font with the OS — the user has to double-click the .ttf and pick
+/// "Install for me only" before the terminal can see it. We pop File
+/// Explorer onto the file via `try_open_font_folder` to make the
+/// double-click a one-click affair.
+pub(super) const INSTALL_TUI_FONT_NOTE_WINDOWS: &str = "The font has been copied. Double-click the .ttf file and choose\n\
+     'Install for me only' to register it with Windows.\n\
+     Then relaunch your terminal and select 'IosevkaTermNerdFont-Regular'\n\
+     in its preferences. See the license file for details.";
 
 pub(super) const INSTALL_NIGHTRIDE_FONT_INTRO: &str =
     "Install Nightride FM Monospace into your user font directory.";
-pub(super) const INSTALL_NIGHTRIDE_FONT_NOTE: &str = "This font is for branding and artwork. It does not cover the full glyph set needed by the live TUI renderer.\n\n'Nightride FM Monospace' is the brand display face — pick it for banners, art or screenshots, not for the TUI itself (it covers ASCII + Latin-1 only, no box-drawing / braille / Nerd-Font glyphs).\nAuthored by Z, creator, and owner of Nightride FM <discord.gg/synthwave>\n---\n<https://www.patreon.com/posts/official-fm-font-60533997>";
+
+/// Post-install copy for macOS / Linux.
+pub(super) const INSTALL_NIGHTRIDE_FONT_NOTE: &str = "Relaunch your terminal. Nightride FM Monospace is now installed.\n\
+     Use it for banners and screenshots only — do not select it for the\n\
+     live TUI, as it lacks the glyphs needed to render the interface\n\
+     correctly. See the license file for details.";
+
+/// Post-install copy for Windows — same double-click step as the TUI
+/// font, plus the brand-display caveat (do not select for the live
+/// TUI; the face does not cover the glyph set needed to render the
+/// interface).
+pub(super) const INSTALL_NIGHTRIDE_FONT_NOTE_WINDOWS: &str = "The font has been copied. Double-click the .ttf file and choose\n\
+     'Install for me only' to register it with Windows.\n\
+     Use it for banners and screenshots only — do not select it for the\n\
+     live TUI; it lacks the glyphs needed to render the interface.";
 
 /// Install Iosevka Term Nerd Font Regular — the TUI render face —
 /// into the platform font directory. Bytes are downloaded on demand
@@ -186,29 +217,37 @@ pub(super) const INSTALL_NIGHTRIDE_FONT_NOTE: &str = "This font is for branding 
 /// [`NightrideError::Validation`] for SHA mismatch / unsupported
 /// platform / missing $HOME.
 pub fn install_tui_font() -> Result<()> {
-    if let Err(err) = install_one_font(&IOSEVKA) {
-        // Fetch failures (DNS down, TLS reject, 4xx/5xx) leave the user
-        // without the font and without a recovery path unless we surface
-        // the upstream URL + SHA pin so they can complete the install
-        // manually. Validation gate failures (magic / SHA mismatch) are
-        // intentionally NOT covered here — those signal upstream drift
-        // and the user must wait for a re-pinned release.
-        if matches!(
-            err,
-            NightrideError::Network { .. } | NightrideError::NetworkRejected { .. }
-        ) {
-            eprintln!();
-            eprintln!("could not fetch the font from upstream");
-            eprintln!();
-            eprintln!("manual download fallback:");
-            eprintln!("  url:     {IOSEVKA_DOWNLOAD_URL}");
-            eprintln!("  sha256:  {IOSEVKA_SHA256_PIN}");
-            eprintln!("  place at: <your platform font dir>/IosevkaTermNerdFont-Regular.ttf");
+    let dest = match install_one_font(&IOSEVKA) {
+        Ok(path) => path,
+        Err(err) => {
+            // Fetch failures (DNS down, TLS reject, 4xx/5xx) leave the user
+            // without the font and without a recovery path unless we surface
+            // the upstream URL + SHA pin so they can complete the install
+            // manually. Validation gate failures (magic / SHA mismatch) are
+            // intentionally NOT covered here — those signal upstream drift
+            // and the user must wait for a re-pinned release.
+            if matches!(
+                err,
+                NightrideError::Network { .. } | NightrideError::NetworkRejected { .. }
+            ) {
+                eprintln!();
+                eprintln!("could not fetch the font from upstream");
+                eprintln!();
+                eprintln!("manual download fallback:");
+                eprintln!("  url:     {IOSEVKA_DOWNLOAD_URL}");
+                eprintln!("  sha256:  {IOSEVKA_SHA256_PIN}");
+                eprintln!("  place at: <your platform font dir>/IosevkaTermNerdFont-Regular.ttf");
+            }
+            return Err(err);
         }
-        return Err(err);
-    }
+    };
     println!();
-    println!("{INSTALL_TUI_FONT_NOTE}");
+    if cfg!(target_os = "windows") {
+        println!("{INSTALL_TUI_FONT_NOTE_WINDOWS}");
+    } else {
+        println!("{INSTALL_TUI_FONT_NOTE}");
+    }
+    try_open_font_folder(&dest);
     Ok(())
 }
 
@@ -231,9 +270,14 @@ pub fn install_tui_font() -> Result<()> {
 /// [`NightrideError::Validation`] for SHA mismatch / unsupported
 /// platform / missing $HOME.
 pub fn install_nightride_font() -> Result<()> {
-    install_one_font(&NIGHTRIDE_FM_MONO)?;
+    let dest = install_one_font(&NIGHTRIDE_FM_MONO)?;
     println!();
-    println!("{INSTALL_NIGHTRIDE_FONT_NOTE}");
+    if cfg!(target_os = "windows") {
+        println!("{INSTALL_NIGHTRIDE_FONT_NOTE_WINDOWS}");
+    } else {
+        println!("{INSTALL_NIGHTRIDE_FONT_NOTE}");
+    }
+    try_open_font_folder(&dest);
     Ok(())
 }
 
@@ -242,7 +286,11 @@ pub fn install_nightride_font() -> Result<()> {
 /// `fc-cache` on Linux. Used by [`install_tui_font`] and
 /// [`install_nightride_font`] so the on-wire side-effect stays
 /// symmetric.
-fn install_one_font(font: &InstallableFont) -> Result<()> {
+///
+/// Returns the absolute path the font was written to so callers can
+/// pass it to `try_open_font_folder` for the Windows Explorer-pop
+/// affordance.
+fn install_one_font(font: &InstallableFont) -> Result<PathBuf> {
     let bytes: Vec<u8> = match font.source {
         FontSource::Embedded { blob } => {
             // Verify embedded blob at install time — build.rs already
@@ -327,7 +375,7 @@ fn install_one_font(font: &InstallableFont) -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok(dest)
 }
 
 /// Download font bytes from `url`, streaming the body while showing a
@@ -451,7 +499,32 @@ pub(super) fn verify_font_sha(bytes: &[u8], pin: &str) -> Result<()> {
 
 /// Resolve the platform font directory. Refuses unsupported platforms
 /// up front rather than writing to a half-correct location.
+///
+/// - macOS: `~/Library/Fonts`
+/// - Linux: `~/.local/share/fonts`
+/// - Windows: `%LOCALAPPDATA%\Microsoft\Windows\Fonts` — the per-user
+///   fonts directory introduced in Windows 10 1809. Writable without
+///   admin and indexed by Windows for the current user. Some terminal
+///   emulators still need the user to double-click the .ttf and pick
+///   "Install for me only" to register it in HKCU; the post-install
+///   hint surfaces that step.
 fn platform_font_dir() -> Result<PathBuf> {
+    if cfg!(target_os = "windows") {
+        // directories 6.0 BaseDirs::data_local_dir() resolves
+        // %LOCALAPPDATA% via the canonical Known Folder ID
+        // (FOLDERID_LocalAppData). Avoids the POSIX-only $HOME path.
+        let base = directories::BaseDirs::new().ok_or_else(|| NightrideError::Validation {
+            op: "cli::install_font::base_dirs",
+            field: "data_local_dir",
+            detail: "could not resolve %LOCALAPPDATA%; user profile missing?".to_string(),
+        })?;
+        return Ok(base
+            .data_local_dir()
+            .join("Microsoft")
+            .join("Windows")
+            .join("Fonts"));
+    }
+
     let home = std::env::var_os("HOME").ok_or_else(|| NightrideError::Validation {
         op: "cli::install_font::home",
         field: "HOME",
@@ -467,7 +540,33 @@ fn platform_font_dir() -> Result<PathBuf> {
         Err(NightrideError::Validation {
             op: "cli::install_font::platform",
             field: "target_os",
-            detail: "install-font supports macOS and Linux only".to_string(),
+            detail: "install-font supports macOS, Linux, and Windows only".to_string(),
         })
     }
+}
+
+/// Pop File Explorer focused on the freshly-written `.ttf` so the
+/// operator can double-click to register the font with the Windows
+/// font subsystem (terminals on Windows do not auto-pick up files
+/// dropped into `%LOCALAPPDATA%\Microsoft\Windows\Fonts\`).
+///
+/// Best-effort. Skipped when:
+/// - host is not Windows (no-op),
+/// - stdout is not a TTY (scripted invocation; do not pop UI).
+///
+/// `explorer.exe /select,<path>` opens the parent folder with the
+/// target file pre-selected, ready for a double-click. Spawn errors
+/// (missing PATH, headless session) are swallowed — the post-install
+/// note already explained where the file lives.
+fn try_open_font_folder(font_path: &std::path::Path) {
+    use std::io::IsTerminal;
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+    if !std::io::stdout().is_terminal() {
+        return;
+    }
+    let _ = ProcCommand::new("explorer.exe")
+        .arg(format!("/select,{}", font_path.display()))
+        .spawn();
 }

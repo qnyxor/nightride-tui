@@ -134,8 +134,33 @@ else
                 *)               die "unsupported Linux arch: $ARCH" ;;
             esac
             ;;
+        MINGW*|MSYS*|CYGWIN*)
+            # Windows host running this script through Git Bash, MSYS2,
+            # or Cygwin. The install pipeline below copies the binary to
+            # ~/.local/bin and shells out to `chmod` / `codesign` —
+            # neither maps cleanly to a Windows install. Surface the
+            # native flow instead of half-installing a POSIX layout
+            # under a Windows user profile.
+            printf '\n'
+            printf '[%s!%s] %-8s :: this installer is POSIX-only.\n' \
+                "$C_WARN" "$C_RESET" "windows"
+            printf '\n    Native Windows install:\n'
+            printf '      1. Download nightride-tui-x86_64-pc-windows-msvc.zip + .sha256\n'
+            printf '         from %shttps://win.nightride-tui.qnyxor.nexus%s\n' \
+                "$C_INFO" "$C_RESET"
+            printf '         (or %shttps://github.com/%s/releases/latest%s)\n' \
+                "$C_INFO" "$REPO" "$C_RESET"
+            printf '      2. Verify the checksum:\n'
+            printf '           Get-FileHash <zip> -Algorithm SHA256\n'
+            printf '         must match the .sha256 sidecar.\n'
+            printf '      3. Extract nightride-tui.exe to a directory on your %%PATH%%.\n'
+            printf '      4. Run nightride-tui.exe from Windows Terminal.\n'
+            printf '\n    Self-update once installed: %snightride-tui update%s\n\n' \
+                "$C_INFO" "$C_RESET"
+            exit 0
+            ;;
         *)
-            die "unsupported OS: $OS (only macOS and Linux are supported)" ;;
+            die "unsupported OS: $OS (macOS, Linux, and Windows native are supported; Windows install flow is documented above)" ;;
     esac
 
     row_info "target" "$TARGET"

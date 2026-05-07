@@ -48,6 +48,13 @@ pub struct Theme {
     /// True when the terminal advertises 24-bit truecolor support; false
     /// triggers the 8-colour fallback path in colour-emitting helpers.
     pub truecolor: bool,
+    /// True when running under a legacy Windows console (`cmd.exe`
+    /// without ConPTY, no Windows Terminal). Triggers the ASCII
+    /// glyph fallback so braille spinners and the `…` ellipsis don't
+    /// render as `?`. False on every non-Windows platform and on
+    /// modern Windows hosts (Windows Terminal, ConEmu, VS Code,
+    /// any `TERM`-aware shell).
+    pub legacy_console: bool,
 }
 
 impl Theme {
@@ -58,9 +65,16 @@ impl Theme {
     pub fn detect() -> Self {
         let truecolor = std::env::var("COLORTERM")
             .is_ok_and(|v| v.contains("truecolor") || v.contains("24bit"));
+        let legacy_console = detect_legacy_console();
+        let glyphs = if legacy_console {
+            GlyphSet::ascii_legacy()
+        } else {
+            GlyphSet::default()
+        };
         Self {
-            glyphs: GlyphSet::default(),
+            glyphs,
             truecolor,
+            legacy_console,
         }
     }
 
@@ -202,10 +216,33 @@ impl Theme {
     }
 
     /// Foreground style for the station-accent dim variant — drives the
-    /// inactive ticks of the volume mini-bar.
+    /// inactive ticks of the volume mini-bar AND the dimmed timer trio
+    /// in the floating header.
+    ///
+    /// On 8-colour terminals (Windows console default, any TERM where
+    /// `COLORTERM` does not advertise truecolor) the indexed accent is
+    /// not an `Rgb` value, so `fade_color` cannot per-channel-scale it.
+    /// `fade_color`'s invariant: factor ≥ 0.5 returns the indexed colour
+    /// unchanged; factor < 0.5 collapses to `Color::Reset` (a "below
+    /// alpha threshold" sentinel). `Color::Reset` then renders as the
+    /// terminal's default foreground — white on Windows — which is fine
+    /// for fades that are meant to disappear, but wrong for dim chrome
+    /// that has to stay visible (the empty volume tail).
+    ///
+    /// Decision tree:
+    /// - factor ≥ 0.5 (e.g. timer trio at 0.6) → indexed accent, full
+    ///   colour preserved on every terminal.
+    /// - factor < 0.5 with truecolor → per-channel-scaled RGB.
+    /// - factor < 0.5 without truecolor → `fade_color` returns Reset,
+    ///   and we override here to `DarkGray` so the volume empty tail
+    ///   is still visible as ambient chrome.
     #[must_use]
     pub fn accent_dim_style(&self, station: &Station, factor: f32) -> Style {
-        Style::default().fg(self.accent_dim(station, factor))
+        let color = self.accent_dim(station, factor);
+        if matches!(color, Color::Reset) {
+            return Style::default().fg(Color::DarkGray);
+        }
+        Style::default().fg(color)
     }
 }
 
@@ -253,6 +290,58 @@ impl Default for GlyphSet {
     }
 }
 
+impl GlyphSet {
+    /// ASCII-only glyph set for legacy Windows consoles (`cmd.exe`
+    /// without ConPTY). Replaces the braille spinner with the
+    /// classic `- \ | /` rotation and substitutes `…` for `...`
+    /// so non-UTF-8 codepages don't render `?`.
+    #[must_use]
+    pub fn ascii_legacy() -> Self {
+        Self {
+            volume_bar: "|",
+            now_separator: "/",
+            tuning_placeholder: "tuning...",
+            metadata_loading_placeholder: "loading metadata...",
+            mute_label: "MUTE",
+            spinner_frames: &['-', '\\', '|', '/'],
+        }
+    }
+}
+
+/// Heuristic legacy-console detector.
+///
+/// Returns `true` only when the host is Windows AND none of the
+/// known modern-terminal signals are present. Matches the rule used
+/// by `which-terminal-am-i-in` style libraries:
+///
+/// - `WT_SESSION` is set unconditionally by Windows Terminal (since
+///   1.0) and absent in `cmd.exe`.
+/// - `TERM_PROGRAM` is set by VS Code, Hyper, and other Electron
+///   terminals; cmd.exe does not set it.
+/// - `TERM` is set by Git Bash, MSYS2, MinGW, Cygwin, and any shell
+///   running inside a ConPTY-aware host. cmd.exe leaves it unset.
+///
+/// On non-Windows platforms this is always `false` — modern unices
+/// always carry a usable `TERM` and never need the ASCII fallback.
+fn detect_legacy_console() -> bool {
+    if !cfg!(target_os = "windows") {
+        return false;
+    }
+    if std::env::var_os("WT_SESSION").is_some() {
+        return false;
+    }
+    if std::env::var_os("TERM_PROGRAM").is_some() {
+        return false;
+    }
+    if let Ok(term) = std::env::var("TERM")
+        && !term.is_empty()
+        && term != "dumb"
+    {
+        return false;
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::Theme;
@@ -270,6 +359,7 @@ mod tests {
         let theme = Theme {
             glyphs: super::GlyphSet::default(),
             truecolor: false,
+            legacy_console: false,
         };
         assert_eq!(theme.brand_red(), ratatui::style::Color::Red);
         assert_eq!(
@@ -287,11 +377,29 @@ mod tests {
         let theme = Theme {
             glyphs: super::GlyphSet::default(),
             truecolor: true,
+            legacy_console: false,
         };
         match theme.brand_red() {
             ratatui::style::Color::Rgb(214, 52, 43) => (),
             other => panic!("expected brand red RGB, got {other:?}"),
         }
+    }
+
+    /// ASCII legacy glyph set never uses Unicode codepoints — guards against
+    /// the spinner rotation drifting back to braille and the placeholder
+    /// strings drifting back to `…` (which `cmd.exe` without ConPTY renders
+    /// as `?`).
+    #[test]
+    fn ascii_legacy_glyphs_are_pure_ascii() {
+        let glyphs = super::GlyphSet::ascii_legacy();
+        for frame in glyphs.spinner_frames {
+            assert!(
+                frame.is_ascii(),
+                "ascii_legacy spinner frame {frame:?} is not ASCII"
+            );
+        }
+        assert!(glyphs.tuning_placeholder.is_ascii());
+        assert!(glyphs.metadata_loading_placeholder.is_ascii());
     }
 
     /// Every station in the registry resolves to a concrete colour through
@@ -302,9 +410,59 @@ mod tests {
         let theme = Theme {
             glyphs: super::GlyphSet::default(),
             truecolor: true,
+            legacy_console: false,
         };
         for station in DEFAULT_STATIONS {
             let _ = theme.accent_for(station);
         }
+    }
+
+    /// `Theme::detect()` on a non-Windows host always returns
+    /// `legacy_console: false` — guards against the heuristic
+    /// flipping to legacy under any unix-y env combination.
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn detect_never_legacy_on_unix() {
+        let theme = Theme::detect();
+        assert!(!theme.legacy_console);
+    }
+
+    /// Without truecolor and a low factor (volume empty tail at 0.25)
+    /// the dim style must short-circuit to `Color::DarkGray` instead
+    /// of letting `fade_color` collapse to `Color::Reset` (which
+    /// Windows renders as the default white fg, turning empty pipes
+    /// into bright artefacts that outshine the filled head).
+    #[test]
+    fn accent_dim_style_low_factor_without_truecolor_falls_back_to_dark_gray() {
+        let theme = Theme {
+            glyphs: super::GlyphSet::default(),
+            truecolor: false,
+            legacy_console: false,
+        };
+        let station = &DEFAULT_STATIONS[0];
+        let style = theme.accent_dim_style(station, 0.25);
+        assert_eq!(style.fg, Some(ratatui::style::Color::DarkGray));
+    }
+
+    /// Without truecolor but with a factor at or above 0.5 (timer trio
+    /// at 0.6) the indexed accent passes through `fade_color`
+    /// unchanged. The dim style must NOT collapse to `Color::DarkGray`
+    /// — that would erase the per-station accent on the Windows
+    /// timestamp / uptime / song-elapsed timers.
+    #[test]
+    fn accent_dim_style_high_factor_without_truecolor_keeps_indexed_accent() {
+        let theme = Theme {
+            glyphs: super::GlyphSet::default(),
+            truecolor: false,
+            legacy_console: false,
+        };
+        // nightride station has BrandMagenta accent; in 8-colour mode
+        // BrandMagenta resolves to Color::Magenta.
+        let nightride = DEFAULT_STATIONS
+            .iter()
+            .find(|s| s.slug == "nightride")
+            .expect("nightride station present");
+        let style = theme.accent_dim_style(nightride, 0.6);
+        assert_eq!(style.fg, Some(ratatui::style::Color::Magenta));
     }
 }

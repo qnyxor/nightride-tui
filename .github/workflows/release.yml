@@ -34,11 +34,9 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04
             cross: true
-          # x86_64-pc-windows-gnu deferred to v1.1.1 — the lane was
-          # never smoke-tested on real Windows hardware and the M5
-          # deliverable (MSVC native + Resource.rc + nightride-tui.ico
-          # + ASCII spinner fallback) is incomplete. Shipping a broken
-          # `.exe` is worse than shipping no `.exe`.
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2022
+            cross: false
 
     steps:
       - name: Checkout
@@ -103,6 +101,7 @@ jobs:
         run: codesign --force -s - "target/${{ matrix.target }}/release/nightride-tui"
 
       - name: Package tarball
+        shell: bash
         run: |
           TAG="${{ github.ref_name }}"
           TARGET="${{ matrix.target }}"

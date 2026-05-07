@@ -12,6 +12,44 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-05-07
+
+### Added
+
+- **Native Windows binary.** `nightride-tui-x86_64-pc-windows-msvc.zip`
+  is now published on every release alongside the macOS and Linux
+  artifacts. Built on `windows-2022` with the MSVC toolchain; ships a
+  signed PE with embedded application icon and full VERSIONINFO
+  (CompanyName, FileDescription, FileVersion, ProductName, Copyright
+  with the project homepage, Comments with the homepage and repo
+  URLs). Visible under right-click → Properties → Details.
+- **Native Windows self-update.** `nightride-tui update` works on
+  Windows: it queries the GitHub Releases API, downloads the latest
+  signed zip + `.sha256` sidecar, verifies the checksum, extracts
+  with PowerShell's `Expand-Archive`, and swaps the in-place `.exe`
+  via the canonical Windows rename-trick. The previous binary stays
+  on disk as `nightride-tui.exe.old` for rollback.
+- **Windows install paths surfaced.** State file at
+  `%APPDATA%\qnyxor\nightride\config\nightride-tui.md`; daily-rotated
+  logs at `%APPDATA%\qnyxor\nightride\data\log\nightride.log.YYYY-MM-DD`.
+  `install-tui-font` and `install-nightride-font` now write to
+  `%LOCALAPPDATA%\Microsoft\Windows\Fonts\` and pop File Explorer
+  focused on the new `.ttf` so the OS-side registration is one
+  double-click away.
+- **ASCII spinner fallback.** Legacy Windows consoles without ConPTY
+  (or any TERM where Braille codepoints render as `?`) now get the
+  classic `- \ | /` spinner rotation and `...` placeholders instead
+  of `…`.
+
+### Changed
+
+- **Spectrum format prefix breathing room.** `MP3 ` / `HLS ` becomes
+  `MP3  ` / `HLS  ` (one extra cell) so the spectrum body no longer
+  abuts the prefix glyph.
+- **Volume label / bar gap.** A single-cell separator between the
+  label envelope and the bar series — `MUTE |||…` / `50 % |||…`
+  instead of `MUTE|||…` / `50 %|||…`.
+
 ## [1.1.0] — 2026-05-07
 
 ### Added
@@ -208,7 +246,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - Bundled Iosevka Term Nerd Font and Nightride FM Monospace install commands.
 - Curl-pipe installer for macOS arm64 / x86_64 and Linux x86_64 / aarch64.
 
-[Unreleased]: https://github.com/qnyxor/nightride-tui/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/qnyxor/nightride-tui/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/qnyxor/nightride-tui/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/qnyxor/nightride-tui/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/qnyxor/nightride-tui/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/qnyxor/nightride-tui/compare/v1.0.2...v1.0.3

@@ -89,8 +89,14 @@ fn volume_spans(app: &App, alpha: f32) -> Vec<Span<'static>> {
     let filled_style = fade_style_fg(&app.theme, filled_style_base, alpha);
     let empty_style = fade_style_fg(&app.theme, empty_style_base, alpha);
 
+    // Single-cell gap between the label envelope and the bar series:
+    // without it, `MUTE` runs straight into the empty pipes
+    // (`MUTE|||…`) and any percentage runs into the filled head
+    // (`50 %|||…`). The gap is unstyled — the surrounding label and
+    // bar styling carries the visual weight.
     vec![
         Span::styled(label, label_style),
+        Span::raw(" "),
         Span::styled(filled_bar, filled_style),
         Span::styled(empty_bar, empty_style),
     ]

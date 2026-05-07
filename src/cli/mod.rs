@@ -23,6 +23,8 @@
 //!   `install_tui_font` / `install_nightride_font` helpers.
 
 pub(crate) mod fonts;
+#[cfg(target_os = "windows")]
+pub(crate) mod update_windows;
 
 pub use fonts::{install_nightride_font, install_tui_font};
 
@@ -373,6 +375,21 @@ pub fn dispatch(args: &CliArgs) -> &Command {
 /// be spawned and [`crate::error::NightrideError::ConfigInvalid`] when
 /// either curl or the install script exits with a non-zero status.
 pub fn run_update() -> crate::error::Result<()> {
+    // Windows takes a separate path: the install script
+    // (`sh.nightride-tui.qnyxor.nexus`) is POSIX shell, and `sh` is
+    // not on the Windows baseline. The native flow downloads the
+    // release zip via reqwest, verifies SHA-256, extracts via
+    // PowerShell's Expand-Archive, and swaps the in-place `.exe`
+    // through the rename-trick — see `update_windows::run`.
+    #[cfg(target_os = "windows")]
+    return update_windows::run();
+
+    #[cfg(not(target_os = "windows"))]
+    run_update_posix()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_update_posix() -> crate::error::Result<()> {
     use std::io::IsTerminal;
 
     let use_color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
@@ -496,7 +513,12 @@ pub fn run_update() -> crate::error::Result<()> {
 ///
 /// Manual substring parse — the GitHub `releases/latest` schema is stable
 /// and we want zero extra dependencies for one field. Returns the raw tag
-/// (e.g. `v1.0.4`).
+/// (e.g. `v1.0.4`). Consumed by `run_update_posix` (POSIX hosts) and by
+/// the unit tests in this module on every host; the Windows update flow
+/// keeps a private copy in `cli::update_windows::parse_tag_name`. The
+/// `dead_code` allow guards the lint when the runtime caller is gone on
+/// Windows, but the function is still compiled so its tests can run.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 fn parse_tag_name(json: &str) -> Option<String> {
     let key = "\"tag_name\"";
     let start = json.find(key)?;

@@ -1,0 +1,52 @@
+// ---
+// SPDX-FileCopyrightText: (c) 2026 QNYXOR <qnyxor@pm.me> <https://qnyxor.nexus>
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileComment: Part of nightride-tui at <https://github.com/qnyxor/nightride-tui>
+// ---
+//
+// Windows resource script for the PE binary.
+//
+// Embedded by build.rs via the `embed-resource` crate when targeting
+// Windows. Two payloads:
+//   1. IDI_ICON1 — multi-resolution application icon. Source ICO is
+//      assets/windows/nightride-tui.ico (16/32/48/64/128/256 px).
+//   2. VS_VERSION_INFO — File Explorer "Properties" panel + AppInfo
+//      registry record. Strings are static; FILEVERSION /
+//      PRODUCTVERSION numeric tuples follow Cargo.toml `version`
+//      and MUST be hand-bumped in the same commit as `version =`.
+//      Drift between Cargo.toml and this file is a release-blocking
+//      bug — caught by `tests/version_resource.rs`.
+
+#include <windows.h>
+
+IDI_ICON1 ICON "nightride-tui.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    1,1,1,0
+PRODUCTVERSION 1,1,1,0
+FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+FILEFLAGS      0x0L
+FILEOS         VOS_NT_WINDOWS32
+FILETYPE       VFT_APP
+FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "QNYXOR"
+            VALUE "FileDescription",  "Terminal client for the nightride.fm synthwave streams"
+            VALUE "FileVersion",      "1.1.1.0"
+            VALUE "InternalName",     "nightride-tui"
+            VALUE "LegalCopyright",   "(c) 2026 QNYXOR <https://qnyxor.nexus>. Apache-2.0."
+            VALUE "OriginalFilename", "nightride-tui.exe"
+            VALUE "ProductName",      "NightRideTUI"
+            VALUE "ProductVersion",   "1.1.1.0"
+            VALUE "Comments",         "https://qnyxor.nexus | https://github.com/qnyxor/nightride-tui"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04B0
+    END
+END

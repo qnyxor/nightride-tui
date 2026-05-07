@@ -52,11 +52,18 @@ pub enum TransportFormat {
     Hls,
 }
 
-/// Canonical user-dir location of `nightride-tui.md`. On macOS:
-/// `~/Library/Application Support/nexus.qnyxor.nightride/nightride-tui.md`;
-/// on Linux: `~/.config/nightride/nightride-tui.md`. Falls back to
-/// `/tmp/nightride/nightride-tui.md` when `ProjectDirs` returns None
-/// (sandboxed environment without `$HOME`).
+/// Canonical user-dir location of `nightride-tui.md`. Per
+/// `directories` 6.0 ProjectDirs:
+///
+/// - macOS: `~/Library/Application Support/nexus.qnyxor.nightride/nightride-tui.md`
+///   (bundle id = `<qualifier>.<organization>.<application>`).
+/// - Linux: `~/.config/nightride/nightride-tui.md` (XDG, qualifier
+///   and organization are ignored).
+/// - Windows: `%APPDATA%\qnyxor\nightride\config\nightride-tui.md`
+///   (qualifier ignored; `<organization>\<application>\config`).
+///
+/// Falls back to `/tmp/nightride/nightride-tui.md` when `ProjectDirs`
+/// returns None (sandboxed environment without `$HOME`).
 ///
 /// Resolving here keeps the binary's mutable state OUT of the repo
 /// working tree — running `cargo run` from the source checkout no

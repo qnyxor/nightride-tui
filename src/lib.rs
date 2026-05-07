@@ -322,7 +322,7 @@ mod tests {
     fn user_agent_resolves_correctly() {
         assert_eq!(
             USER_AGENT,
-            "nightride-tui/1.1.0 (+https://github.com/qnyxor/nightride-tui)",
+            "nightride-tui/1.1.1 (+https://github.com/qnyxor/nightride-tui)",
         );
     }
 }
